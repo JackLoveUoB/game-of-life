@@ -1,6 +1,10 @@
 package gol
 
-import "uk.ac.bris.cs/gameoflife/util"
+import (
+	"fmt"
+
+	"uk.ac.bris.cs/gameoflife/util"
+)
 
 type distributorChannels struct {
 	events     chan<- Event
@@ -19,15 +23,13 @@ func distributor(p Params, c distributorChannels) {
 	imageHeight := p.ImageHeight
 	imageWidth := p.ImageWidth
 
-	c.ioCommand = make(chan ioCommand)
-
 	//for _, b
 	world := make([][]byte, imageHeight)
 	for i := range world {
 		world[i] = make([]byte, imageWidth)
 	}
 	c.ioCommand <- ioInput
-	c.ioFilename <- "128x128"
+	c.ioFilename <- fmt.Sprintf("%dx%d", imageWidth, imageHeight)
 	for y := 0; y < imageHeight; y++ {
 		for x := 0; x < imageWidth; x++ {
 			world[y][x] = <-c.ioInput
