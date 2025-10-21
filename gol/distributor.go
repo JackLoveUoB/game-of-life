@@ -13,6 +13,9 @@ type distributorChannels struct {
 func distributor(p Params, c distributorChannels) {
 
 	// TODO: Create a 2D slice to store the world.
+	filename := make(chan string)
+	c.ioFilename = filename
+	filename <- "128x128"
 
 	turn := 0
 	c.events <- StateChange{turn, Executing}
