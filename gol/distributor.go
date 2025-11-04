@@ -2,7 +2,7 @@ package gol
 
 import (
 	"fmt"
-
+    "time"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -44,14 +44,31 @@ func distributor(p Params, c distributorChannels) {
 
 	c.events <- StateChange{turn, Executing}
 
-    //Start the calculation of new board states
+    //Start the AliveCellCount Event
+    ticker := time.NewTicker(2 * time.Second)
+    allTurnsDone := make(chan bool)
+    currentTurnDone := make(chan bool)
 
-	for turn := 0; turn < p.Turns; turn++ {
+    go func(){
+        for{
+            select{
+                case <- allTurnsDone:
+                    return
+                case <- ticker.C:
+                    <- currentTurnDone
+                    c.events <- AliveCellsCount{turn, len(calculateAliveCells(p, world))}
+            }
+        }
+    }()
+
+
+
+    //Start the calculation of new board states
+	for turn = 0; turn < p.Turns; turn++ {
 		var newWorld [][]byte
 		if p.Threads == 1 {
 			world = calculateNextState(p.ImageHeight, p.ImageWidth, p.Turns, world)
-		}
-		else {
+		} else {
 		    //Calculate chunks for the workers
 			chunkHeight := p.ImageHeight / p.Threads
 			outyChannels := make([]chan [][]byte, p.Threads)
@@ -78,7 +95,10 @@ func distributor(p Params, c distributorChannels) {
 			}
 			world = newWorld
 		}
+        currentTurnDone <- true
 	}
+    //stops the alive cells ticker
+    allTurnsDone <- true
 
 	// Report the final state using FinalTurnCompleteEvent.
 	c.events <- FinalTurnComplete{
