@@ -2,7 +2,7 @@ package gol
 
 import (
 	"fmt"
-
+    "net/rpc"
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -13,6 +13,11 @@ type distributorChannels struct {
 	ioFilename chan<- string
 	ioOutput   chan<- uint8
 	ioInput    <-chan uint8
+}
+
+type Args struct{
+    ImageHeight, ImageWidth, Turns int
+    World [][]byte
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
@@ -48,7 +53,16 @@ func distributor(p Params, c distributorChannels) {
 	for turn := 0; turn < p.Turns; turn++ {
 		var newWorld [][]byte
 		if p.Threads == 1 {
-			world = calculateNextState(p.ImageHeight, p.ImageWidth, p.Turns, world)
+		    client, err := rpc.Dial("tcp", "50.17.18.251:1234")
+		    if(err != nil){fmt.Println("Error connecting:", err)}
+		    defer client.Close()
+
+		    args := Args{ImageHeight: p.ImageHeight, ImageWidth: p.ImageWidth, Turns: p.Turns, World: world}
+            var result [][]byte
+
+            _ = client.Call("Worker.CalculateNextState", args, &result)
+            world = result
+			//world = calculateNextState(p.ImageHeight, p.ImageWidth, p.Turns, world)
 		} else {
 			chunkHeight := p.ImageHeight / p.Threads
 			outyChannels := make([]chan [][]byte, p.Threads)
@@ -93,65 +107,6 @@ func distributor(p Params, c distributorChannels) {
 	close(c.events)
 }
 
-func adjustLeftRight(a, b int) int {
-	return (a + b) % b
-}
-
-func adjustUpDown(a, b int) int {
-	return (a + b) % b
-}
-
-func deepCopy2D(world [][]byte) [][]byte {
-	copyWorld := make([][]byte, len(world))
-	for i := range world {
-		copyWorld[i] = make([]byte, len(world[i]))
-		copy(copyWorld[i], world[i]) // copy row
-	}
-	return copyWorld
-}
-
-func calculateNextState(imageHeight, imageWidth, turns int, world [][]byte) [][]byte {
-	if turns == 0 {
-		return world
-	}
-	copyWorld := deepCopy2D(world)
-	for i := 0; i < len(world); i++ { //each row
-		for j := 0; j < len(world[i]); j++ { //each cell
-			alive := 0
-			adjacentAlive := 0
-			if world[i][j] == 255 {
-				alive = 1
-			}
-			for k := -1; k <= 1; k++ {
-				for m := -1; m <= 1; m++ {
-					if k == 0 && m == 0 {
-						continue
-					}
-					newi := adjustUpDown(i+k, imageHeight)
-					newj := adjustLeftRight(j+m, imageWidth)
-					if world[newi][newj] == 255 {
-						adjacentAlive++
-					}
-				}
-			}
-			if alive == 1 {
-				if adjacentAlive < 2 || adjacentAlive > 3 {
-					copyWorld[i][j] = 0
-				} else {
-					copyWorld[i][j] = 255
-				}
-			} else {
-				if adjacentAlive == 3 {
-					copyWorld[i][j] = 255
-				}
-			}
-
-		}
-
-	}
-	//world = copyWorld
-	return copyWorld
-}
 
 func newCell(x, y int) util.Cell {
 	return util.Cell{x, y}
@@ -189,7 +144,16 @@ func worker(p Params, world [][]byte, startY, endY int, out chan<- [][]byte) {
 		copy(chunk[y], world[sauceY])
 	}
 
-	next := calculateNextState(chunkHeight+2, imageWidth, p.Turns, chunk)
+    client, err := rpc.Dial("tcp", "50.17.18.251:1234")
+    if(err != nil){fmt.Println("Error connecting:", err)}
+    defer client.Close()
+
+    args := Args{ImageHeight: chunkHeight+2, ImageWidth: imageWidth, Turns: p.Turns, World: chunk}
+    var next [][]byte
+
+    _ = client.Call("Worker.CalculateNextState", args, &next)
+
+	//next := calculateNextState(chunkHeight+2, imageWidth, p.Turns, chunk)
 
 	trimItDown := next[1 : len(next)-1]
 	out <- trimItDown
