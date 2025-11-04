@@ -17,15 +17,23 @@ type distributorChannels struct {
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
+    //What is being done:
+        //Get all the input data for the GOL
+        //Split into worker functions
+        //Send each worker off
+        //Receive the updated game state
+        //Assemble the gol board
 
-	// TODO: Create a 2D slice to store the world.
-	//c.ioFilename <- "128x128"
-	imageHeight := p.ImageHeight
-	imageWidth := p.ImageWidth
+    //Initialise Channels and variables
+    imageHeight := p.ImageHeight
+    imageWidth := p.ImageWidth
 
+    c.ioCommand <- ioInput
+    c.ioFilename <- fmt.Sprintf("%dx%d", imageWidth, imageHeight)
+
+    //Make the gol board
 	world := makeWorld(imageHeight, imageWidth)
-	c.ioCommand <- ioInput
-	c.ioFilename <- fmt.Sprintf("%dx%d", imageWidth, imageHeight)
+
 	for y := 0; y < imageHeight; y++ {
 		for x := 0; x < imageWidth; x++ {
 			world[y][x] = <-c.ioInput
@@ -33,17 +41,18 @@ func distributor(p Params, c distributorChannels) {
 	}
 
 	turn := 0
-	if p.Turns == 0 {
-		turn = 1
-	}
+
 	c.events <- StateChange{turn, Executing}
-	// TODO: Execute all turns of the Game of Life.
+
+    //Start the calculation of new board states
 
 	for turn := 0; turn < p.Turns; turn++ {
 		var newWorld [][]byte
 		if p.Threads == 1 {
 			world = calculateNextState(p.ImageHeight, p.ImageWidth, p.Turns, world)
-		} else {
+		}
+		else {
+		    //Calculate chunks for the workers
 			chunkHeight := p.ImageHeight / p.Threads
 			outyChannels := make([]chan [][]byte, p.Threads)
 			for i := 0; i < p.Threads; i++ {
@@ -63,6 +72,7 @@ func distributor(p Params, c distributorChannels) {
 					endY,
 					outyChannels[i])
 			}
+            // Assemble the board
 			for i := 0; i < p.Threads; i++ {
 				newWorld = append(newWorld, <-outyChannels[i]...)
 			}
@@ -70,17 +80,17 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
-	// TODO: Report the final state using FinalTurnCompleteEvent.
-
+	// Report the final state using FinalTurnCompleteEvent.
 	c.events <- FinalTurnComplete{
 		turn,
 		calculateAliveCells(p, world),
 	}
 
-	// Make sure that the Io has finished any output before exiting.
+	// Make sure that the IO has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 
+    // Send the quitting event at the end of the turns
 	c.events <- StateChange{turn, Quitting}
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
