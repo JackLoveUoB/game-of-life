@@ -45,21 +45,21 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 	allTurnsDone := make(chan bool)
 	//currentTurnDone := make(chan bool)
 
-	//go func() {
-	//	for {
-	//		select {
-	//		case <-allTurnsDone:
-	//
-	//			return
-	//		case <-ticker.C:
-	//			mu.Lock()
-	//			turn2 := turn
-	//			alive2 := len(calculateAliveCells(p, world))
-	//			mu.Unlock()
-	//			c.events <- AliveCellsCount{turn2, alive2}
-	//		}
-	//	}
-	//}()
+	go func() {
+		for {
+			select {
+			case <-allTurnsDone:
+
+				return
+			case <-ticker.C:
+				mu.Lock()
+				turn2 := turn
+				alive2 := len(calculateAliveCells(p, world))
+				mu.Unlock()
+				c.events <- AliveCellsCount{turn2, alive2}
+			}
+		}
+	}()
 
 	go func() {
 		for keys := range keyPress2 {
@@ -73,21 +73,21 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 		}
 	}()
 
-	go func() {
-		for {
-			select {
-			case <-allTurnsDone:
-				return
-			case key := <-keyPress2:
-				switch key {
-				case 'q':
-					c.events <- StateChange{turn, Quitting}
-					return
-				case 'p':
-				}
-			}
-		}
-	}()
+	//go func() {
+	//	for {
+	//		select {
+	//		case <-allTurnsDone:
+	//			return
+	//		case key := <-keyPress2:
+	//			switch key {
+	//			case 'q':
+	//				c.events <- StateChange{turn, Quitting}
+	//				return
+	//			case 'p':
+	//			}
+	//		}
+	//	}
+	//}()
 
 	//Start the calculation of new board states
 	for turn = 0; turn < p.Turns; turn++ {
