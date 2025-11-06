@@ -4,6 +4,7 @@ import (
 	"fmt"
     "net/rpc"
 	"uk.ac.bris.cs/gameoflife/util"
+	"time"
 )
 
 type distributorChannels struct {
@@ -23,72 +24,55 @@ type Args struct{
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels) {
 
-	// TODO: Create a 2D slice to store the world.
-	//c.ioFilename <- "128x128"
-	imageHeight := p.ImageHeight
-	imageWidth := p.ImageWidth
+    //Connect to server
+    client, err := rpc.Dial("tcp", "localhost:1234")
+    if(err != nil){fmt.Println("Error connecting:", err)}
+    defer client.Close()
 
-	//for _, b
-	world := makeWorld(imageHeight, imageWidth)
-	c.ioCommand <- ioInput
-	c.ioFilename <- fmt.Sprintf("%dx%d", imageWidth, imageHeight)
-	for y := 0; y < imageHeight; y++ {
-		for x := 0; x < imageWidth; x++ {
-			world[y][x] = <-c.ioInput
-		}
-	}
+    //Create the world slice
+    imageHeight := p.ImageHeight
+    imageWidth := p.ImageWidth
 
-	turn := 0
-	////c.events = <-	FinalTurnComplete{
-	////		turn,
-	////		calculateAliveCells(p, world),
-	////	}
-	if p.Turns == 0 {
-		turn = 1
-	}
-	c.events <- StateChange{turn, Executing}
-	//c.ioIdle <- true
-	// TODO: Execute all turns of the Game of Life.
+    world := makeWorld(imageHeight, imageWidth)
+    c.ioCommand <- ioInput
+    c.ioFilename <- fmt.Sprintf("%dx%d", imageWidth, imageHeight)
+    for y := 0; y < imageHeight; y++ {
+        for x := 0; x < imageWidth; x++ {
+            world[y][x] = <-c.ioInput
+        }
+    }
 
-	for turn := 0; turn < p.Turns; turn++ {
-		var newWorld [][]byte
-		if p.Threads == 1 {
-		    client, err := rpc.Dial("tcp", "50.17.18.251:1234")
-		    if(err != nil){fmt.Println("Error connecting:", err)}
-		    defer client.Close()
+    //Define server arguments
+    args := Args{ImageHeight: p.ImageHeight, ImageWidth: p.ImageWidth, Turns: p.Turns, World: world}
+    turn := 0
+    c.events <- StateChange{turn, Executing}
 
-		    args := Args{ImageHeight: p.ImageHeight, ImageWidth: p.ImageWidth, Turns: p.Turns, World: world}
-            var result [][]byte
 
-            _ = client.Call("Worker.CalculateNextState", args, &result)
-            world = result
-			//world = calculateNextState(p.ImageHeight, p.ImageWidth, p.Turns, world)
-		} else {
-			chunkHeight := p.ImageHeight / p.Threads
-			outyChannels := make([]chan [][]byte, p.Threads)
-			for i := 0; i < p.Threads; i++ {
-				outyChannels[i] = make(chan [][]byte)
-			}
-			for i := 0; i < p.Threads; i++ {
-				startY := i * chunkHeight
-				endY := (i + 1) * chunkHeight
-				if i == p.Threads-1 {
-					endY = p.ImageHeight
-				}
 
-				go worker(
-					p,
-					world,
-					startY,
-					endY,
-					outyChannels[i])
-			}
-			for i := 0; i < p.Threads; i++ {
-				newWorld = append(newWorld, <-outyChannels[i]...)
-			}
-			world = newWorld
-		}
-	}
+    //Start alivecellscount ticker
+	ticker := time.NewTicker(2 * time.Second)
+	done := make(chan bool)
+
+	go func(){
+	    for{
+	        select{
+	            case <- done:
+                    return
+                case <- ticker.C:
+                    var result AliveCellsCount
+                    _ = client.Call("Server.GetAliveCells", args, &result)
+                    turn = result.CompletedTurns
+                    c.events <- result
+	        }
+	    }
+	}()
+
+
+
+	// Send request to calculate GOL
+    var result [][]byte
+    _ = client.Call("Server.CalculateNStates", args, &result)
+    world = result
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 
@@ -104,6 +88,7 @@ func distributor(p Params, c distributorChannels) {
 	c.events <- StateChange{turn, Quitting}
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
+	done <- true
 	close(c.events)
 }
 

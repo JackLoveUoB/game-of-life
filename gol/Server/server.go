@@ -4,18 +4,28 @@ import(
     "net"
     "net/rpc"
     "fmt"
+    "sync"
 )
 
-type Worker struct{}
+type Server struct{
+    turn int
+    world [][]byte
+    mu sync.Mutex
+}
 
 type Args struct{
     ImageHeight, ImageWidth, Turns int
     World [][]byte
 }
 
+type AliveCellsCount struct {
+	CompletedTurns int
+	CellsCount     int
+}
+
 func main(){
-    worker := new(Worker)
-    rpc.Register(worker)
+    server := new(Server)
+    rpc.Register(server)
 
     listener, err := net.Listen("tcp", ":1234")
     if(err != nil) {fmt.Println("Error listening:", err)}
@@ -26,18 +36,41 @@ func main(){
 
 }
 
-func (worker *Worker) CalculateNextState(args Args, result *[][]byte) error {
-    fmt.Println("Calculating State")
-	if args.Turns == 0 {
-		*result = args.World
-		return nil
+func (server *Server) GetAliveCells(args Args, result *AliveCellsCount) error{
+    server.mu.Lock()
+    turns := server.turn
+    aliveCells := calculateNumAliveCells(args.ImageHeight, args.ImageWidth, server.world)
+    server.mu.Unlock()
+    *result = AliveCellsCount{turns, aliveCells}
+    return nil
+}
+
+func (server *Server) CalculateNStates(args Args, result *[][]byte) error{
+    fmt.Println("Calculating", args.Turns, "turns")
+
+    //Calculate the states
+    world := args.World
+    for t := 0; t < args.Turns; t++{
+        server.mu.Lock()
+        server.turn = t
+        server.world = world
+        server.mu.Unlock()
+        world = CalculateNextState(args.ImageHeight, args.ImageWidth, args.Turns, world)
+    }
+    *result = world
+    return nil
+}
+
+func CalculateNextState(imageHeight, imageWidth, turns int, world [][]byte) [][]byte {
+	if turns == 0 {
+		return world
 	}
-	copyWorld := deepCopy2D(args.World)
-	for i := 0; i < len(args.World); i++ { //each row
-		for j := 0; j < len(args.World[i]); j++ { //each cell
+	copyWorld := deepCopy2D(world)
+	for i := 0; i < len(world); i++ { //each row
+		for j := 0; j < len(world[i]); j++ { //each cell
 			alive := 0
 			adjacentAlive := 0
-			if args.World[i][j] == 255 {
+			if world[i][j] == 255 {
 				alive = 1
 			}
 			for k := -1; k <= 1; k++ {
@@ -45,9 +78,9 @@ func (worker *Worker) CalculateNextState(args Args, result *[][]byte) error {
 					if k == 0 && m == 0 {
 						continue
 					}
-					newi := adjustUpDown(i+k, args.ImageHeight)
-					newj := adjustLeftRight(j+m, args.ImageWidth)
-					if args.World[newi][newj] == 255 {
+					newi := adjustUpDown(i+k, imageHeight)
+					newj := adjustLeftRight(j+m, imageWidth)
+					if world[newi][newj] == 255 {
 						adjacentAlive++
 					}
 				}
@@ -68,8 +101,7 @@ func (worker *Worker) CalculateNextState(args Args, result *[][]byte) error {
 
 	}
 	//world = copyWorld
-	*result = copyWorld
-	return nil
+	return copyWorld
 }
 
 func adjustLeftRight(a, b int) int {
@@ -87,4 +119,16 @@ func deepCopy2D(world [][]byte) [][]byte {
 		copy(copyWorld[i], world[i]) // copy row
 	}
 	return copyWorld
+}
+
+func calculateNumAliveCells(imageHeight, imageWidth int, world [][]byte) int {
+	numCells := 0
+	for y := 0; y < imageHeight; y++ {
+		for x := 0; x < imageWidth; x++ {
+			if world[y][x] == 255 {
+				numCells ++
+			}
+		}
+	}
+	return numCells
 }
