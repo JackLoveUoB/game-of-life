@@ -16,7 +16,7 @@ type distributorChannels struct {
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels) {
+func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 
 	// TODO: Create a 2D slice to store the world.
 	//c.ioFilename <- "128x128"
@@ -33,6 +33,9 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
+	//quitFlag := false
+	//saveFlag := false
+	//pauseFlag := false
 	turn := 0
 
 	c.events <- StateChange{turn, Executing}
@@ -42,18 +45,46 @@ func distributor(p Params, c distributorChannels) {
 	allTurnsDone := make(chan bool)
 	//currentTurnDone := make(chan bool)
 
+	//go func() {
+	//	for {
+	//		select {
+	//		case <-allTurnsDone:
+	//
+	//			return
+	//		case <-ticker.C:
+	//			mu.Lock()
+	//			turn2 := turn
+	//			alive2 := len(calculateAliveCells(p, world))
+	//			mu.Unlock()
+	//			c.events <- AliveCellsCount{turn2, alive2}
+	//		}
+	//	}
+	//}()
+
+	go func() {
+		for keys := range keyPress2 {
+			if keys == 's' {
+				mu.Lock()
+				worldSave := deepCopy2D(world)
+				saveTurn := turn
+				mu.Unlock()
+				outputPgm(p, c, worldSave, saveTurn)
+			}
+		}
+	}()
+
 	go func() {
 		for {
 			select {
 			case <-allTurnsDone:
-
 				return
-			case <-ticker.C:
-				mu.Lock()
-				turn2 := turn
-				alive2 := len(calculateAliveCells(p, world))
-				mu.Unlock()
-				c.events <- AliveCellsCount{turn2, alive2}
+			case key := <-keyPress2:
+				switch key {
+				case 'q':
+					c.events <- StateChange{turn, Quitting}
+					return
+				case 'p':
+				}
 			}
 		}
 	}()
@@ -99,15 +130,21 @@ func distributor(p Params, c distributorChannels) {
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 
-	c.ioCommand <- ioOutput
-	imageName := fmt.Sprintf("%dx%dx%d", p.ImageWidth, p.ImageHeight, p.Turns)
-	c.ioFilename <- imageName
-	//imageOutput := make([]uint8, p.ImageHeight*p.ImageWidth)
-	for y := 0; y < p.ImageHeight; y++ {
-		for x := 0; x < p.ImageWidth; x++ {
-			c.ioOutput <- world[y][x]
-		}
-	}
+	//c.ioCommand <- ioOutput
+	//imageName := fmt.Sprintf("%dx%dx%d", p.ImageWidth, p.ImageHeight, p.Turns)
+	//c.ioFilename <- imageName
+	////imageOutput := make([]uint8, p.ImageHeight*p.ImageWidth)
+	//for y := 0; y < p.ImageHeight; y++ {
+	//	for x := 0; x < p.ImageWidth; x++ {
+	//		c.ioOutput <- world[y][x]
+	//	}
+	//}
+	//c.events <- ImageOutputComplete{
+	//	turn,
+	//	imageName,
+	//}
+
+	outputPgm(p, c, world, turn)
 
 	c.events <- FinalTurnComplete{
 		turn,
