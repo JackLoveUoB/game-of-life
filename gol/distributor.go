@@ -81,15 +81,28 @@ func distributor(p Params, c distributorChannels) {
 		calculateAliveCells(p, world),
 	}
 
+    //Output PGM image
+    c.ioCommand <- ioOutput
+    imageName := fmt.Sprintf("%dx%dx%d", p.ImageWidth, p.ImageHeight, p.Turns)
+    c.ioFilename <- imageName
+    //imageOutput := make([]uint8, p.ImageHeight*p.ImageWidth)
+    for y := 0; y < p.ImageHeight; y++ {
+        for x := 0; x < p.ImageWidth; x++ {
+            c.ioOutput <- world[y][x]
+        }
+    }
+
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 
 	c.events <- StateChange{turn, Quitting}
 
+
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	done <- true
 	close(c.events)
+
 }
 
 
