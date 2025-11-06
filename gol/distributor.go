@@ -2,8 +2,8 @@ package gol
 
 import (
 	"fmt"
-    "time"
-	"uk.ac.bris.cs/gameoflife/util"
+	"sync"
+	"time"
 )
 
 type distributorChannels struct {
@@ -24,6 +24,7 @@ func distributor(p Params, c distributorChannels) {
 	imageWidth := p.ImageWidth
 
 	world := makeWorld(imageHeight, imageWidth)
+	var mu sync.Mutex
 	c.ioCommand <- ioInput
 	c.ioFilename <- fmt.Sprintf("%dx%d", imageWidth, imageHeight)
 	for y := 0; y < imageHeight; y++ {
@@ -36,32 +37,36 @@ func distributor(p Params, c distributorChannels) {
 
 	c.events <- StateChange{turn, Executing}
 
-    //Start the AliveCellCount Event
-    ticker := time.NewTicker(2 * time.Second)
-    allTurnsDone := make(chan bool)
-    currentTurnDone := make(chan bool)
+	//Start the AliveCellCount Event
+	ticker := time.NewTicker(2 * time.Second)
+	allTurnsDone := make(chan bool)
+	//currentTurnDone := make(chan bool)
 
-    go func(){
-        for{
-            select{
-                case <- allTurnsDone:
-                    return
-                case <- ticker.C:
-                    <- currentTurnDone
-                    c.events <- AliveCellsCount{turn, len(calculateAliveCells(p, world))}
-            }
-        }
-    }()
+	go func() {
+		for {
+			select {
+			case <-allTurnsDone:
 
+				return
+			case <-ticker.C:
+				mu.Lock()
+				turn2 := turn
+				alive2 := len(calculateAliveCells(p, world))
+				mu.Unlock()
+				c.events <- AliveCellsCount{turn2, alive2}
+			}
+		}
+	}()
 
-
-    //Start the calculation of new board states
+	//Start the calculation of new board states
 	for turn = 0; turn < p.Turns; turn++ {
 		var newWorld [][]byte
 		if p.Threads == 1 {
+			mu.Lock()
 			world = calculateNextState(p.ImageHeight, p.ImageWidth, p.Turns, world)
-    } else {
-		    //Calculate chunks for the workers
+			mu.Unlock()
+		} else {
+			//Calculate chunks for the workers
 			chunkHeight := p.ImageHeight / p.Threads
 			outyChannels := make([]chan [][]byte, p.Threads)
 			for i := 0; i < p.Threads; i++ {
@@ -84,14 +89,25 @@ func distributor(p Params, c distributorChannels) {
 			for i := 0; i < p.Threads; i++ {
 				newWorld = append(newWorld, <-outyChannels[i]...)
 			}
+			mu.Lock()
 			world = newWorld
+			mu.Unlock()
 		}
-        currentTurnDone <- true
 	}
-    //stops the alive cells ticker
-    allTurnsDone <- true
+	//stops the alive cells ticker
+	allTurnsDone <- true
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
+
+	c.ioCommand <- ioOutput
+	imageName := fmt.Sprintf("%dx%dx%d", p.ImageWidth, p.ImageHeight, p.Turns)
+	c.ioFilename <- imageName
+	//imageOutput := make([]uint8, p.ImageHeight*p.ImageWidth)
+	for y := 0; y < p.ImageHeight; y++ {
+		for x := 0; x < p.ImageWidth; x++ {
+			c.ioOutput <- world[y][x]
+		}
+	}
 
 	c.events <- FinalTurnComplete{
 		turn,
@@ -125,85 +141,10 @@ func deepCopy2D(world [][]byte) [][]byte {
 	return copyWorld
 }
 
-func calculateNextState(imageHeight, imageWidth, turns int, world [][]byte) [][]byte {
-	if turns == 0 {
-		return world
-	}
-	copyWorld := deepCopy2D(world)
-	for i := 0; i < len(world); i++ { //each row
-		for j := 0; j < len(world[i]); j++ { //each cell
-			alive := 0
-			adjacentAlive := 0
-			if world[i][j] == 255 {
-				alive = 1
-			}
-			for k := -1; k <= 1; k++ {
-				for m := -1; m <= 1; m++ {
-					if k == 0 && m == 0 {
-						continue
-					}
-					newi := adjustUpDown(i+k, imageHeight)
-					newj := adjustLeftRight(j+m, imageWidth)
-					if world[newi][newj] == 255 {
-						adjacentAlive++
-					}
-				}
-			}
-			if alive == 1 {
-				if adjacentAlive < 2 || adjacentAlive > 3 {
-					copyWorld[i][j] = 0
-				} else {
-					copyWorld[i][j] = 255
-				}
-			} else {
-				if adjacentAlive == 3 {
-					copyWorld[i][j] = 255
-				}
-			}
-
-		}
-
-	}
-	//world = copyWorld
-	return copyWorld
-}
-
-func newCell(x, y int) util.Cell {
-	return util.Cell{x, y}
-}
-
-func calculateAliveCells(p Params, world [][]byte) []util.Cell {
-	cells := []util.Cell{}
-	for y := 0; y < p.ImageHeight; y++ {
-		for x := 0; x < p.ImageWidth; x++ {
-			if world[y][x] == 255 {
-				cells = append(cells, newCell(x, y))
-			}
-		}
-	}
-	return cells
-}
-
 func makeWorld(height, width int) [][]byte {
 	world := make([][]byte, height)
 	for i := range world {
 		world[i] = make([]byte, width)
 	}
 	return world
-}
-
-func worker(p Params, world [][]byte, startY, endY int, out chan<- [][]byte) {
-	imageHeight := p.ImageHeight
-	imageWidth := p.ImageWidth
-	chunkHeight := endY - startY
-
-	chunk := makeWorld(chunkHeight+2, imageWidth)
-
-	for y := 0; y < chunkHeight+2; y++ {
-		sauceY := (startY + y - 1 + imageHeight) % imageHeight
-		copy(chunk[y], world[sauceY])
-	}
-	next := calculateNextState(chunkHeight+2, imageWidth, p.Turns, chunk)
-	trimItDown := next[1 : len(next)-1]
-	out <- trimItDown
 }
