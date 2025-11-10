@@ -44,6 +44,7 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 	ticker := time.NewTicker(2 * time.Second)
 	allTurnsDone := make(chan bool)
 	//currentTurnDone := make(chan bool)
+	finishPremature := false
 
 	go func() {
 		for {
@@ -70,6 +71,20 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 				mu.Unlock()
 				outputPgm(p, c, worldSave, saveTurn)
 			}
+			if keys == 'q' {
+				finishPremature = true
+				c.events <- FinalTurnComplete{
+					turn,
+					calculateAliveCells(p, world),
+				}
+				mu.Lock()
+				worldSave := deepCopy2D(world)
+				saveTurn := turn
+				mu.Unlock()
+				outputPgm(p, c, worldSave, saveTurn)
+				c.events <- StateChange{turn, Quitting}
+				return
+			}
 		}
 	}()
 
@@ -91,7 +106,12 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 
 	//Start the calculation of new board states
 	for turn = 0; turn < p.Turns; turn++ {
+		if finishPremature {
+			//turn = p.Turns
+			break
+		}
 		var newWorld [][]byte
+
 		if p.Threads == 1 {
 			mu.Lock()
 			world = calculateNextState(p.ImageHeight, p.ImageWidth, p.Turns, world)

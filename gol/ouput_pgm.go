@@ -20,4 +20,5 @@ func outputPgm(p Params, c distributorChannels, world [][]byte, turn int) {
 		turn,
 		imageName,
 	}
+	return
 }
