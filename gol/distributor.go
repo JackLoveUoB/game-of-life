@@ -33,9 +33,10 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 		}
 	}
 
-	//quitFlag := false
+	quitFlag := false
 	//saveFlag := false
-	//pauseFlag := false
+	pauseFlag := false
+	pauseChannel := make(chan bool)
 	turn := 0
 
 	c.events <- StateChange{turn, Executing}
@@ -44,7 +45,6 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 	ticker := time.NewTicker(2 * time.Second)
 	allTurnsDone := make(chan bool)
 	//currentTurnDone := make(chan bool)
-	finishPremature := false
 
 	go func() {
 		for {
@@ -72,7 +72,7 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 				outputPgm(p, c, worldSave, saveTurn)
 			}
 			if keys == 'q' {
-				finishPremature = true
+				quitFlag = true
 				c.events <- FinalTurnComplete{
 					turn,
 					calculateAliveCells(p, world),
@@ -84,6 +84,18 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 				outputPgm(p, c, worldSave, saveTurn)
 				c.events <- StateChange{turn, Quitting}
 				return
+			}
+			if keys == 'p' {
+				if !pauseFlag {
+					pauseFlag = true
+					pauseChannel <- pauseFlag
+					c.events <- StateChange{turn, Paused}
+				}
+				if pauseFlag {
+					pauseFlag = false
+					pauseChannel <- pauseFlag
+					c.events <- StateChange{turn, Executing}
+				}
 			}
 		}
 	}()
@@ -105,46 +117,28 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 	//}()
 
 	//Start the calculation of new board states
+mainProg:
 	for turn = 0; turn < p.Turns; turn++ {
-		if finishPremature {
+		if quitFlag {
 			//turn = p.Turns
 			break
 		}
-		var newWorld [][]byte
-
-		if p.Threads == 1 {
-			mu.Lock()
-			world = calculateNextState(p.ImageHeight, p.ImageWidth, p.Turns, world)
-			mu.Unlock()
-		} else {
-			//Calculate chunks for the workers
-			chunkHeight := p.ImageHeight / p.Threads
-			outyChannels := make([]chan [][]byte, p.Threads)
-			for i := 0; i < p.Threads; i++ {
-				outyChannels[i] = make(chan [][]byte)
-			}
-			for i := 0; i < p.Threads; i++ {
-				startY := i * chunkHeight
-				endY := (i + 1) * chunkHeight
-				if i == p.Threads-1 {
-					endY = p.ImageHeight
+		pauseState := <-pauseChannel
+		if !pauseState {
+			executeProg(p, c, &mu, world)
+		}
+		if pauseState {
+			for {
+				if quitFlag {
+					break mainProg
 				}
-
-				go worker(
-					p,
-					world,
-					startY,
-					endY,
-					outyChannels[i])
+				if !pauseFlag {
+					break
+				}
 			}
-			for i := 0; i < p.Threads; i++ {
-				newWorld = append(newWorld, <-outyChannels[i]...)
-			}
-			mu.Lock()
-			world = newWorld
-			mu.Unlock()
 		}
 	}
+
 	//stops the alive cells ticker
 	allTurnsDone <- true
 
@@ -204,4 +198,41 @@ func makeWorld(height, width int) [][]byte {
 		world[i] = make([]byte, width)
 	}
 	return world
+}
+
+func executeProg(p Params, c distributorChannels, mu *sync.Mutex, world [][]byte) {
+	var newWorld [][]byte
+
+	if p.Threads == 1 {
+		mu.Lock()
+		world = calculateNextState(p.ImageHeight, p.ImageWidth, p.Turns, world)
+		mu.Unlock()
+	} else {
+		//Calculate chunks for the workers
+		chunkHeight := p.ImageHeight / p.Threads
+		outyChannels := make([]chan [][]byte, p.Threads)
+		for i := 0; i < p.Threads; i++ {
+			outyChannels[i] = make(chan [][]byte)
+		}
+		for i := 0; i < p.Threads; i++ {
+			startY := i * chunkHeight
+			endY := (i + 1) * chunkHeight
+			if i == p.Threads-1 {
+				endY = p.ImageHeight
+			}
+
+			go worker(
+				p,
+				world,
+				startY,
+				endY,
+				outyChannels[i])
+		}
+		for i := 0; i < p.Threads; i++ {
+			newWorld = append(newWorld, <-outyChannels[i]...)
+		}
+		mu.Lock()
+		world = newWorld
+		mu.Unlock()
+	}
 }
