@@ -30,6 +30,12 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 	for y := 0; y < imageHeight; y++ {
 		for x := 0; x < imageWidth; x++ {
 			world[y][x] = <-c.ioInput
+			if world[y][x] == 255 {
+				c.events <- CellFlipped{
+					0,
+					newCell(x, y),
+				}
+			}
 		}
 	}
 
@@ -135,7 +141,7 @@ mainProg:
 			}
 		}
 
-		world = executer(p, c, &mu, world)
+		world = executer(p, c, turn, &mu, world)
 	}
 
 	//stops the alive cells ticker
@@ -185,7 +191,7 @@ func makeWorld(height, width int) [][]byte {
 	return world
 }
 
-func executer(p Params, c distributorChannels, mu *sync.Mutex, world [][]byte) [][]byte {
+func executer(p Params, c distributorChannels, turn int, mu *sync.Mutex, world [][]byte) [][]byte {
 	var newWorld [][]byte
 
 	if p.Threads == 1 {
@@ -212,6 +218,7 @@ func executer(p Params, c distributorChannels, mu *sync.Mutex, world [][]byte) [
 				world,
 				startY,
 				endY,
+				turn,
 				outyChannels[i])
 		}
 		for i := 0; i < p.Threads; i++ {

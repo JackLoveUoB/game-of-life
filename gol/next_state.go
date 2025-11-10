@@ -1,16 +1,16 @@
 package gol
 
-func calculateNextState(c distributorChannels, imageHeight, imageWidth, turns int, world [][]byte) [][]byte {
-	if turns == 0 {
+func calculateNextState(c distributorChannels, imageHeight, imageWidth, turn int, world [][]byte) [][]byte {
+	if turn == 0 {
 		return world
 	}
 	copyWorld := deepCopy2D(world)
 	for i := 0; i < len(world); i++ { //each row
 		for j := 0; j < len(world[i]); j++ { //each cell
-			alive := 0
+			alive := false
 			adjacentAlive := 0
 			if world[i][j] == 255 {
-				alive = 1
+				alive = true
 			}
 			for k := -1; k <= 1; k++ {
 				for m := -1; m <= 1; m++ {
@@ -24,15 +24,23 @@ func calculateNextState(c distributorChannels, imageHeight, imageWidth, turns in
 					}
 				}
 			}
-			if alive == 1 {
+			if alive == true {
 				if adjacentAlive < 2 || adjacentAlive > 3 {
 					copyWorld[i][j] = 0
+					c.events <- CellFlipped{
+						turn,
+						newCell(j, i),
+					}
 				} else {
 					copyWorld[i][j] = 255
 				}
 			} else {
 				if adjacentAlive == 3 {
 					copyWorld[i][j] = 255
+					c.events <- CellFlipped{
+						turn,
+						newCell(j, i),
+					}
 				}
 			}
 
@@ -41,7 +49,7 @@ func calculateNextState(c distributorChannels, imageHeight, imageWidth, turns in
 	}
 	//world = copyWorld
 	c.events <- TurnComplete{
-		turns,
+		turn,
 	}
 	return copyWorld
 }
