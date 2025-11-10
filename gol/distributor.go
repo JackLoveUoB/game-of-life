@@ -73,16 +73,16 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 			}
 			if keys == 'q' {
 				quitFlag = true
-				c.events <- FinalTurnComplete{
-					turn,
-					calculateAliveCells(p, world),
-				}
-				mu.Lock()
-				worldSave := deepCopy2D(world)
-				saveTurn := turn
-				mu.Unlock()
-				outputPgm(p, c, worldSave, saveTurn)
-				c.events <- StateChange{turn, Quitting}
+				//c.events <- FinalTurnComplete{
+				//	turn,
+				//	calculateAliveCells(p, world),
+				//}
+				//mu.Lock()
+				//worldSave := deepCopy2D(world)
+				//saveTurn := turn
+				//mu.Unlock()
+				//outputPgm(p, c, worldSave, saveTurn)
+				//c.events <- StateChange{turn, Quitting}
 				return
 			}
 			//if keys == 'p' {
@@ -149,26 +149,41 @@ mainProg:
 				pauseFlag = true
 				c.events <- StateChange{turn, Paused}
 			}
+			if quitFlag {
+				break mainProg
+			}
 		default:
 
 		}
 
 		if pauseFlag {
-			select {
-			case <-pauseChannel:
-				if pauseFlag {
-					pauseFlag = false
-				} else {
-					pauseFlag = true
-				}
-				if !pauseFlag {
-					c.events <- StateChange{turn, Executing}
-				}
+			for {
 				if quitFlag {
 					break mainProg
 				}
-				continue
-
+				select {
+				case <-pauseChannel:
+					if pauseFlag {
+						pauseFlag = false
+					} else {
+						pauseFlag = true
+					}
+					if !pauseFlag {
+						c.events <- StateChange{turn, Executing}
+					}
+					if pauseFlag {
+						continue
+					}
+					break
+				case <-time.After(time.Millisecond):
+					if quitFlag {
+						break mainProg
+					}
+					continue
+				}
+				if !pauseFlag {
+					break mainProg
+				}
 			}
 		}
 
