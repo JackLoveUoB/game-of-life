@@ -36,7 +36,7 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 	quitFlag := false
 	//saveFlag := false
 	pauseFlag := false
-	pauseChannel := make(chan bool)
+	pauseChannel := make(chan struct{}, 1)
 	turn := 0
 
 	c.events <- StateChange{turn, Executing}
@@ -85,17 +85,20 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 				c.events <- StateChange{turn, Quitting}
 				return
 			}
+			//if keys == 'p' {
+			//	if !pauseFlag {
+			//		pauseFlag = true
+			//		pauseChannel <- pauseFlag
+			//		c.events <- StateChange{turn, Paused}
+			//	}
+			//	if pauseFlag {
+			//		pauseFlag = false
+			//		pauseChannel <- pauseFlag
+			//		c.events <- StateChange{turn, Executing}
+			//	}
+			//}
 			if keys == 'p' {
-				if !pauseFlag {
-					pauseFlag = true
-					pauseChannel <- pauseFlag
-					c.events <- StateChange{turn, Paused}
-				}
-				if pauseFlag {
-					pauseFlag = false
-					pauseChannel <- pauseFlag
-					c.events <- StateChange{turn, Executing}
-				}
+				pauseChannel <- struct{}{}
 			}
 		}
 	}()
@@ -123,20 +126,53 @@ mainProg:
 			//turn = p.Turns
 			break
 		}
-		pauseState := <-pauseChannel
-		if !pauseState {
-			executeProg(p, c, &mu, world)
+		//pauseState := <-pauseChannel
+		//if !pauseState {
+		//	executeProg(p, &mu, world)
+		//}
+		//if pauseState {
+		//	for {
+		//		if quitFlag {
+		//			break mainProg
+		//		}
+		//		if !pauseFlag {
+		//			break
+		//		}
+		//	}
+		//}
+		select {
+		case <-pauseChannel:
+			if pauseFlag {
+				pauseFlag = false
+				c.events <- StateChange{turn, Executing}
+			} else {
+				pauseFlag = true
+				c.events <- StateChange{turn, Paused}
+			}
+		default:
+
 		}
-		if pauseState {
-			for {
+
+		if pauseFlag {
+			select {
+			case <-pauseChannel:
+				if pauseFlag {
+					pauseFlag = false
+				} else {
+					pauseFlag = true
+				}
+				if !pauseFlag {
+					c.events <- StateChange{turn, Executing}
+				}
 				if quitFlag {
 					break mainProg
 				}
-				if !pauseFlag {
-					break
-				}
+				continue
+
 			}
 		}
+
+		world = executeProg(p, &mu, world)
 	}
 
 	//stops the alive cells ticker
@@ -200,7 +236,7 @@ func makeWorld(height, width int) [][]byte {
 	return world
 }
 
-func executeProg(p Params, c distributorChannels, mu *sync.Mutex, world [][]byte) {
+func executeProg(p Params, mu *sync.Mutex, world [][]byte) [][]byte {
 	var newWorld [][]byte
 
 	if p.Threads == 1 {
@@ -231,8 +267,6 @@ func executeProg(p Params, c distributorChannels, mu *sync.Mutex, world [][]byte
 		for i := 0; i < p.Threads; i++ {
 			newWorld = append(newWorld, <-outyChannels[i]...)
 		}
-		mu.Lock()
-		world = newWorld
-		mu.Unlock()
 	}
+	return newWorld
 }
