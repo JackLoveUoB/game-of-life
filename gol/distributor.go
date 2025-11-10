@@ -182,7 +182,7 @@ mainProg:
 					continue
 				}
 				if !pauseFlag {
-					break mainProg
+					break
 				}
 			}
 		}
