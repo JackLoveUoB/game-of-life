@@ -1,10 +1,6 @@
 package gol
 
-import (
-// "uk.ac.bris.cs/gameoflife/util"
-)
-
-func worker(p Params, world [][]byte, startY, endY int, out chan<- [][]byte) {
+func worker(p Params, c distributorChannels, world [][]byte, startY, endY int, out chan<- [][]byte) {
 	imageHeight := p.ImageHeight
 	imageWidth := p.ImageWidth
 	chunkHeight := endY - startY

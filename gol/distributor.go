@@ -187,7 +187,7 @@ mainProg:
 			}
 		}
 
-		world = executeProg(p, &mu, world)
+		world = executer(p, c, &mu, world)
 	}
 
 	//stops the alive cells ticker
@@ -251,12 +251,12 @@ func makeWorld(height, width int) [][]byte {
 	return world
 }
 
-func executeProg(p Params, mu *sync.Mutex, world [][]byte) [][]byte {
+func executer(p Params, c distributorChannels, mu *sync.Mutex, world [][]byte) [][]byte {
 	var newWorld [][]byte
 
 	if p.Threads == 1 {
 		mu.Lock()
-		world = calculateNextState(p.ImageHeight, p.ImageWidth, p.Turns, world)
+		newWorld = calculateNextState(p.ImageHeight, p.ImageWidth, p.Turns, world)
 		mu.Unlock()
 	} else {
 		//Calculate chunks for the workers
@@ -274,6 +274,7 @@ func executeProg(p Params, mu *sync.Mutex, world [][]byte) [][]byte {
 
 			go worker(
 				p,
+				c,
 				world,
 				startY,
 				endY,
