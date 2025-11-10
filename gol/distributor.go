@@ -73,51 +73,13 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 			}
 			if keys == 'q' {
 				quitFlag = true
-				//c.events <- FinalTurnComplete{
-				//	turn,
-				//	calculateAliveCells(p, world),
-				//}
-				//mu.Lock()
-				//worldSave := deepCopy2D(world)
-				//saveTurn := turn
-				//mu.Unlock()
-				//outputPgm(p, c, worldSave, saveTurn)
-				//c.events <- StateChange{turn, Quitting}
 				return
 			}
-			//if keys == 'p' {
-			//	if !pauseFlag {
-			//		pauseFlag = true
-			//		pauseChannel <- pauseFlag
-			//		c.events <- StateChange{turn, Paused}
-			//	}
-			//	if pauseFlag {
-			//		pauseFlag = false
-			//		pauseChannel <- pauseFlag
-			//		c.events <- StateChange{turn, Executing}
-			//	}
-			//}
 			if keys == 'p' {
 				pauseChannel <- struct{}{}
 			}
 		}
 	}()
-
-	//go func() {
-	//	for {
-	//		select {
-	//		case <-allTurnsDone:
-	//			return
-	//		case key := <-keyPress2:
-	//			switch key {
-	//			case 'q':
-	//				c.events <- StateChange{turn, Quitting}
-	//				return
-	//			case 'p':
-	//			}
-	//		}
-	//	}
-	//}()
 
 	//Start the calculation of new board states
 mainProg:
@@ -126,20 +88,6 @@ mainProg:
 			//turn = p.Turns
 			break
 		}
-		//pauseState := <-pauseChannel
-		//if !pauseState {
-		//	executeProg(p, &mu, world)
-		//}
-		//if pauseState {
-		//	for {
-		//		if quitFlag {
-		//			break mainProg
-		//		}
-		//		if !pauseFlag {
-		//			break
-		//		}
-		//	}
-		//}
 		select {
 		case <-pauseChannel:
 			if pauseFlag {
@@ -195,20 +143,6 @@ mainProg:
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 
-	//c.ioCommand <- ioOutput
-	//imageName := fmt.Sprintf("%dx%dx%d", p.ImageWidth, p.ImageHeight, p.Turns)
-	//c.ioFilename <- imageName
-	////imageOutput := make([]uint8, p.ImageHeight*p.ImageWidth)
-	//for y := 0; y < p.ImageHeight; y++ {
-	//	for x := 0; x < p.ImageWidth; x++ {
-	//		c.ioOutput <- world[y][x]
-	//	}
-	//}
-	//c.events <- ImageOutputComplete{
-	//	turn,
-	//	imageName,
-	//}
-
 	outputPgm(p, c, world, turn)
 
 	c.events <- FinalTurnComplete{
@@ -256,7 +190,7 @@ func executer(p Params, c distributorChannels, mu *sync.Mutex, world [][]byte) [
 
 	if p.Threads == 1 {
 		mu.Lock()
-		newWorld = calculateNextState(p.ImageHeight, p.ImageWidth, p.Turns, world)
+		newWorld = calculateNextState(c, p.ImageHeight, p.ImageWidth, p.Turns, world)
 		mu.Unlock()
 	} else {
 		//Calculate chunks for the workers

@@ -11,7 +11,7 @@ func worker(p Params, c distributorChannels, world [][]byte, startY, endY int, o
 		sauceY := (startY + y - 1 + imageHeight) % imageHeight
 		copy(chunk[y], world[sauceY])
 	}
-	next := calculateNextState(chunkHeight+2, imageWidth, p.Turns, chunk)
+	next := calculateNextState(c, chunkHeight+2, imageWidth, p.Turns, chunk)
 	trimItDown := next[1 : len(next)-1]
 	out <- trimItDown
 }

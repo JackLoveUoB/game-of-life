@@ -1,6 +1,6 @@
 package gol
 
-func calculateNextState(imageHeight, imageWidth, turns int, world [][]byte) [][]byte {
+func calculateNextState(c distributorChannels, imageHeight, imageWidth, turns int, world [][]byte) [][]byte {
 	if turns == 0 {
 		return world
 	}
@@ -40,5 +40,8 @@ func calculateNextState(imageHeight, imageWidth, turns int, world [][]byte) [][]
 
 	}
 	//world = copyWorld
+	c.events <- TurnComplete{
+		turns,
+	}
 	return copyWorld
 }
