@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"uk.ac.bris.cs/gameoflife/util"
 )
 
 type distributorChannels struct {
@@ -27,18 +29,21 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 	var mu sync.Mutex
 	c.ioCommand <- ioInput
 	c.ioFilename <- fmt.Sprintf("%dx%d", imageWidth, imageHeight)
+
+	listOfAlive := []util.Cell{}
 	for y := 0; y < imageHeight; y++ {
 		for x := 0; x < imageWidth; x++ {
 			world[y][x] = <-c.ioInput
 			if world[y][x] == 255 {
-				c.events <- CellFlipped{
-					0,
-					newCell(x, y),
-				}
+				listOfAlive = append(listOfAlive, util.Cell{x, y})
 			}
 		}
 	}
 
+	c.events <- CellsFlipped{
+		0,
+		listOfAlive,
+	}
 	quitFlag := false
 	//saveFlag := false
 	pauseFlag := false
@@ -142,6 +147,9 @@ mainProg:
 		}
 
 		world = executer(p, c, turn, &mu, world)
+		c.events <- TurnComplete{
+			turn,
+		}
 	}
 
 	//stops the alive cells ticker
@@ -196,7 +204,7 @@ func executer(p Params, c distributorChannels, turn int, mu *sync.Mutex, world [
 
 	if p.Threads == 1 {
 		mu.Lock()
-		newWorld = calculateNextState(c, p.ImageHeight, p.ImageWidth, p.Turns, world)
+		newWorld = calculateNextState(c, p.ImageHeight, p.ImageWidth, p.Turns, turn, 0, world)
 		mu.Unlock()
 	} else {
 		//Calculate chunks for the workers
@@ -224,6 +232,7 @@ func executer(p Params, c distributorChannels, turn int, mu *sync.Mutex, world [
 		for i := 0; i < p.Threads; i++ {
 			newWorld = append(newWorld, <-outyChannels[i]...)
 		}
+
 	}
 	return newWorld
 }

@@ -1,9 +1,12 @@
 package gol
 
-func calculateNextState(c distributorChannels, imageHeight, imageWidth, turn int, world [][]byte) [][]byte {
-	if turn == 0 {
+import "uk.ac.bris.cs/gameoflife/util"
+
+func calculateNextState(c distributorChannels, imageHeight, imageWidth, turns int, turn int, startY int, world [][]byte) [][]byte {
+	if turns == 0 {
 		return world
 	}
+	listOfAliveInner := []util.Cell{}
 	copyWorld := deepCopy2D(world)
 	for i := 0; i < len(world); i++ { //each row
 		for j := 0; j < len(world[i]); j++ { //each cell
@@ -27,20 +30,14 @@ func calculateNextState(c distributorChannels, imageHeight, imageWidth, turn int
 			if alive == true {
 				if adjacentAlive < 2 || adjacentAlive > 3 {
 					copyWorld[i][j] = 0
-					c.events <- CellFlipped{
-						turn,
-						newCell(j, i),
-					}
+					listOfAliveInner = append(listOfAliveInner, newCell(j, i+startY))
 				} else {
 					copyWorld[i][j] = 255
 				}
 			} else {
 				if adjacentAlive == 3 {
 					copyWorld[i][j] = 255
-					c.events <- CellFlipped{
-						turn,
-						newCell(j, i),
-					}
+					listOfAliveInner = append(listOfAliveInner, newCell(j, i+startY))
 				}
 			}
 
@@ -48,8 +45,12 @@ func calculateNextState(c distributorChannels, imageHeight, imageWidth, turn int
 
 	}
 	//world = copyWorld
-	c.events <- TurnComplete{
+	c.events <- CellsFlipped{
 		turn,
+		listOfAliveInner,
 	}
+	//c.events <- TurnComplete{
+	//	turn,
+	//}
 	return copyWorld
 }
