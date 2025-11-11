@@ -1,21 +1,23 @@
 package main
 
-import(
-    "net"
-    "net/rpc"
-    "fmt"
-    "sync"
+import (
+	"fmt"
+	"net"
+	"net/rpc"
+	"sync"
 )
 
-type Server struct{
-    turn int
-    world [][]byte
-    mu sync.Mutex
+type Server struct {
+	turn     int
+	world    [][]byte
+	mu       sync.Mutex
+	Keypress chan rune
+	Listener net.Listener
 }
 
-type Args struct{
-    ImageHeight, ImageWidth, Turns int
-    World [][]byte
+type Args struct {
+	ImageHeight, ImageWidth, Turns int
+	World                          [][]byte
 }
 
 type AliveCellsCount struct {
@@ -23,42 +25,79 @@ type AliveCellsCount struct {
 	CellsCount     int
 }
 
-func main(){
-    server := new(Server)
-    rpc.Register(server)
+func main() {
+	server := new(Server)
+	rpc.Register(server)
 
-    listener, err := net.Listen("tcp", ":1234")
-    if(err != nil) {fmt.Println("Error listening:", err)}
-    defer listener.Close()
+	listener, err := net.Listen("tcp", ":1234")
+	if err != nil {
+		fmt.Println("Error listening:", err)
+	}
+	fmt.Println("Listening on port 1234...")
 
-    fmt.Println("Listening on port 1234...")
-    rpc.Accept(listener)
+	server.Keypress = make(chan rune, 10)
+	server.Listener = listener
 
+	rpc.Accept(listener)
 }
 
-func (server *Server) GetAliveCells(args Args, result *AliveCellsCount) error{
-    server.mu.Lock()
-    turns := server.turn
-    aliveCells := calculateNumAliveCells(args.ImageHeight, args.ImageWidth, server.world)
-    server.mu.Unlock()
-    *result = AliveCellsCount{turns, aliveCells}
-    return nil
+func (server *Server) GetAliveCells(args Args, result *AliveCellsCount) error {
+	server.mu.Lock()
+	turns := server.turn
+	aliveCells := calculateNumAliveCells(args.ImageHeight, args.ImageWidth, server.world)
+	server.mu.Unlock()
+	*result = AliveCellsCount{turns, aliveCells}
+	return nil
+}
+func (server *Server) GetWorld(args Args, result *[][]byte) error {
+	server.mu.Lock()
+	*result = server.world
+	server.mu.Unlock()
+	return nil
 }
 
-func (server *Server) CalculateNStates(args Args, result *[][]byte) error{
-    fmt.Println("Calculating", args.Turns, "turns")
+func (server *Server) RegisterKey(key rune, result *bool) error {
+	fmt.Println("recieved", key)
+	server.Keypress <- key
+	return nil
+}
 
-    //Calculate the states
-    world := args.World
-    for t := 0; t < args.Turns; t++{
-        server.mu.Lock()
-        server.turn = t
-        server.world = world
-        server.mu.Unlock()
-        world = CalculateNextState(args.ImageHeight, args.ImageWidth, args.Turns, world)
-    }
-    *result = world
-    return nil
+func (server *Server) CalculateNStates(args Args, result *[][]byte) error {
+	fmt.Println("Calculating", args.Turns, "turns")
+	//defer server.Listener.Close() I don't know why this doesn't work but it doesn't
+	pauseFlag := false
+	//Calculate the states
+	world := args.World
+	keypress := server.Keypress
+	for t := 0; t < args.Turns; t++ {
+		server.mu.Lock()
+		server.turn = t
+		server.world = world
+		server.mu.Unlock()
+		select {
+		case key := <-keypress:
+			switch key {
+			case 'p':
+				pauseFlag = !pauseFlag
+			case 'k':
+				fmt.Println("k - returning")
+				*result = world
+				return nil
+			}
+		default:
+			if !pauseFlag {
+				fmt.Println("Calculating Next State")
+				world = CalculateNextState(args.ImageHeight, args.ImageWidth, args.Turns, world)
+			} else {
+				fmt.Println("Paused")
+				t--
+			}
+
+		}
+
+	}
+	*result = world
+	return nil
 }
 
 func CalculateNextState(imageHeight, imageWidth, turns int, world [][]byte) [][]byte {
@@ -126,7 +165,7 @@ func calculateNumAliveCells(imageHeight, imageWidth int, world [][]byte) int {
 	for y := 0; y < imageHeight; y++ {
 		for x := 0; x < imageWidth; x++ {
 			if world[y][x] == 255 {
-				numCells ++
+				numCells++
 			}
 		}
 	}

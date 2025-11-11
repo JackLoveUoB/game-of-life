@@ -2,9 +2,9 @@ package gol
 
 import (
 	"fmt"
-    "net/rpc"
-	"uk.ac.bris.cs/gameoflife/util"
+	"net/rpc"
 	"time"
+	"uk.ac.bris.cs/gameoflife/util"
 )
 
 type distributorChannels struct {
@@ -16,64 +16,101 @@ type distributorChannels struct {
 	ioInput    <-chan uint8
 }
 
-type Args struct{
-    ImageHeight, ImageWidth, Turns int
-    World [][]byte
+type Args struct {
+	ImageHeight, ImageWidth, Turns int
+	World                          [][]byte
+	Keypress                       chan rune
+}
+
+type BrokerArgs struct {
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels) {
+func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
+	/*
+		//Connect to server
+		client, err := rpc.Dial("tcp", "localhost:1234")
+		if err != nil {
+			fmt.Println("Error connecting:", err)
+		}
+		defer client.Close()
 
-    //Connect to server
-    client, err := rpc.Dial("tcp", "localhost:1234")
-    if(err != nil){fmt.Println("Error connecting:", err)}
-    defer client.Close()
+		//Create the world slice
+		imageHeight := p.ImageHeight
+		imageWidth := p.ImageWidth
 
-    //Create the world slice
-    imageHeight := p.ImageHeight
-    imageWidth := p.ImageWidth
+		world := makeWorld(imageHeight, imageWidth)
+		c.ioCommand <- ioInput
+		c.ioFilename <- fmt.Sprintf("%dx%d", imageWidth, imageHeight)
+		for y := 0; y < imageHeight; y++ {
+			for x := 0; x < imageWidth; x++ {
+				world[y][x] = <-c.ioInput
+			}
+		}
 
-    world := makeWorld(imageHeight, imageWidth)
-    c.ioCommand <- ioInput
-    c.ioFilename <- fmt.Sprintf("%dx%d", imageWidth, imageHeight)
-    for y := 0; y < imageHeight; y++ {
-        for x := 0; x < imageWidth; x++ {
-            world[y][x] = <-c.ioInput
-        }
-    }
+		//Define server arguments
+		args := Args{ImageHeight: p.ImageHeight, ImageWidth: p.ImageWidth, Turns: p.Turns, World: world, Keypress: make(chan rune, 10)}
+		turn := 0
+		c.events <- StateChange{turn, Executing}
 
-    //Define server arguments
-    args := Args{ImageHeight: p.ImageHeight, ImageWidth: p.ImageWidth, Turns: p.Turns, World: world}
-    turn := 0
-    c.events <- StateChange{turn, Executing}
+		//Start alivecellscount ticker
+		ticker := time.NewTicker(2 * time.Second)
+		done := make(chan bool)
 
+		go func() {
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					var result AliveCellsCount
+					_ = client.Call("Server.GetAliveCells", args, &result)
+					turn = result.CompletedTurns
+					c.events <- result
+				}
+			}
+		}()
 
+		go func() {
+			for key := range keyPress {
+				var callback bool
+				client.Call("Server.RegisterKey", key, &callback)
+				if key == 's' {
+					var currentWorld [][]byte
+					client.Call("Server.GetWorld", args, &currentWorld)
+					outputPGMImage(p, c, currentWorld)
+				} else if key == 'q' {
+					var currentWorld [][]byte
+					client.Call("Server.GetWorld", args, &currentWorld)
+					closeClient(p, c, done, turn, currentWorld)
+				} //p and k are handled server side - if the server shuts down the client will anyway because world returns
+			}
+		}()
 
-    //Start alivecellscount ticker
-	ticker := time.NewTicker(2 * time.Second)
-	done := make(chan bool)
+		// Send request to calculate GOL
+		var result [][]byte
+		_ = client.Call("Server.CalculateNStates", args, &result)
+		println("World size", len(result))
+		world = result
 
-	go func(){
-	    for{
-	        select{
-	            case <- done:
-                    return
-                case <- ticker.C:
-                    var result AliveCellsCount
-                    _ = client.Call("Server.GetAliveCells", args, &result)
-                    turn = result.CompletedTurns
-                    c.events <- result
-	        }
-	    }
-	}()
+		closeClient(p, c, done, turn, world)
+	*/
+	//Establish connection with broker
+	node, err := rpc.Dial("tcp", "localhost:1234")
+	if err != nil {
+		fmt.Println("Error connecting:", err)
+	}
+	defer node.Close()
 
+	//TODO: Get turns from broker
 
+	var world [][]byte
+	node.Call("CalculateNStates")
 
-	// Send request to calculate GOL
-    var result [][]byte
-    _ = client.Call("Server.CalculateNStates", args, &result)
-    world = result
+	//TODO: Implement turn count ticker
+}
 
+func closeClient(p Params, c distributorChannels, done chan bool, turn int, world [][]byte) {
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 
 	c.events <- FinalTurnComplete{
@@ -81,16 +118,8 @@ func distributor(p Params, c distributorChannels) {
 		calculateAliveCells(p, world),
 	}
 
-    //Output PGM image
-    c.ioCommand <- ioOutput
-    imageName := fmt.Sprintf("%dx%dx%d", p.ImageWidth, p.ImageHeight, p.Turns)
-    c.ioFilename <- imageName
-    //imageOutput := make([]uint8, p.ImageHeight*p.ImageWidth)
-    for y := 0; y < p.ImageHeight; y++ {
-        for x := 0; x < p.ImageWidth; x++ {
-            c.ioOutput <- world[y][x]
-        }
-    }
+	//Output PGM image
+	outputPGMImage(p, c, world)
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
@@ -98,13 +127,22 @@ func distributor(p Params, c distributorChannels) {
 
 	c.events <- StateChange{turn, Quitting}
 
-
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	done <- true
 	close(c.events)
-
 }
 
+func outputPGMImage(p Params, c distributorChannels, world [][]byte) {
+	c.ioCommand <- ioOutput
+	imageName := fmt.Sprintf("%dx%dx%d", p.ImageWidth, p.ImageHeight, p.Turns)
+	c.ioFilename <- imageName
+	//imageOutput := make([]uint8, p.ImageHeight*p.ImageWidth)
+	for y := 0; y < p.ImageHeight; y++ {
+		for x := 0; x < p.ImageWidth; x++ {
+			c.ioOutput <- world[y][x]
+		}
+	}
+}
 
 func newCell(x, y int) util.Cell {
 	return util.Cell{x, y}
@@ -142,14 +180,16 @@ func worker(p Params, world [][]byte, startY, endY int, out chan<- [][]byte) {
 		copy(chunk[y], world[sauceY])
 	}
 
-    client, err := rpc.Dial("tcp", "50.17.18.251:1234")
-    if(err != nil){fmt.Println("Error connecting:", err)}
-    defer client.Close()
+	client, err := rpc.Dial("tcp", "50.17.18.251:1234")
+	if err != nil {
+		fmt.Println("Error connecting:", err)
+	}
+	defer client.Close()
 
-    args := Args{ImageHeight: chunkHeight+2, ImageWidth: imageWidth, Turns: p.Turns, World: chunk}
-    var next [][]byte
+	args := Args{ImageHeight: chunkHeight + 2, ImageWidth: imageWidth, Turns: p.Turns, World: chunk}
+	var next [][]byte
 
-    _ = client.Call("Worker.CalculateNextState", args, &next)
+	_ = client.Call("Worker.CalculateNextState", args, &next)
 
 	//next := calculateNextState(chunkHeight+2, imageWidth, p.Turns, chunk)
 
