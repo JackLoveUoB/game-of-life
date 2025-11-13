@@ -1,6 +1,6 @@
 package gol
 
-func worker(p Params, c distributorChannels, world [][]byte, startY, endY int, turn int, out chan<- [][]byte) {
+func worker(p Params, c distributorChannels, world [][]byte, startY, endY, turn int, out chan<- [][]byte) {
 	imageHeight := p.ImageHeight
 	imageWidth := p.ImageWidth
 	chunkHeight := endY - startY
@@ -11,7 +11,7 @@ func worker(p Params, c distributorChannels, world [][]byte, startY, endY int, t
 		sauceY := (startY + y - 1 + imageHeight) % imageHeight
 		copy(chunk[y], world[sauceY])
 	}
-	next := calculateNextState(c, chunkHeight+2, imageWidth, p.Turns, turn, startY, chunk)
+	next := calculateNextState(c, p, imageWidth, p.Turns, turn, startY, chunk)
 	trimItDown := next[1 : len(next)-1]
 	out <- trimItDown
 }

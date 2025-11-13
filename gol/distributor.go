@@ -47,10 +47,10 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 	quitFlag := false
 	//saveFlag := false
 	pauseFlag := false
-	pauseChannel := make(chan struct{}, 1)
 	turn := 0
+	completedTurns := 0
 
-	c.events <- StateChange{turn, Executing}
+	c.events <- StateChange{completedTurns, Executing}
 
 	//Start the AliveCellCount Event
 	ticker := time.NewTicker(2 * time.Second)
@@ -65,7 +65,7 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 				return
 			case <-ticker.C:
 				mu.Lock()
-				turn2 := turn
+				turn2 := completedTurns
 				alive2 := len(calculateAliveCells(p, world))
 				mu.Unlock()
 				c.events <- AliveCellsCount{turn2, alive2}
@@ -78,7 +78,7 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 			if keys == 's' {
 				mu.Lock()
 				worldSave := deepCopy2D(world)
-				saveTurn := turn
+				saveTurn := completedTurns
 				mu.Unlock()
 				outputPgm(p, c, worldSave, saveTurn)
 			}
@@ -87,68 +87,35 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 				return
 			}
 			if keys == 'p' {
-				pauseChannel <- struct{}{}
+				//pauseChannel <- struct{}{}
+				pauseFlag = !pauseFlag
+				if pauseFlag {
+					c.events <- StateChange{completedTurns, Paused}
+				} else {
+					c.events <- StateChange{completedTurns, Executing}
+				}
 			}
 		}
 	}()
 
 	//Start the calculation of new board states
-mainProg:
 	for turn = 0; turn < p.Turns; turn++ {
+
 		if quitFlag {
 			//turn = p.Turns
 			break
 		}
-		select {
-		case <-pauseChannel:
-			if pauseFlag {
-				pauseFlag = false
-				c.events <- StateChange{turn, Executing}
-			} else {
-				pauseFlag = true
-				c.events <- StateChange{turn, Paused}
-			}
-			if quitFlag {
-				break mainProg
-			}
-		default:
-
-		}
 
 		if pauseFlag {
-			for {
-				if quitFlag {
-					break mainProg
-				}
-				select {
-				case <-pauseChannel:
-					if pauseFlag {
-						pauseFlag = false
-					} else {
-						pauseFlag = true
-					}
-					if !pauseFlag {
-						c.events <- StateChange{turn, Executing}
-					}
-					if pauseFlag {
-						continue
-					}
-					break
-				case <-time.After(time.Millisecond):
-					if quitFlag {
-						break mainProg
-					}
-					continue
-				}
-				if !pauseFlag {
-					break
-				}
+			turn -= 1
+		} else {
+			mu.Lock()
+			world = executer(p, c, completedTurns+1, &mu, world)
+			completedTurns++
+			mu.Unlock()
+			c.events <- TurnComplete{
+				completedTurns,
 			}
-		}
-
-		world = executer(p, c, turn, &mu, world)
-		c.events <- TurnComplete{
-			turn,
 		}
 	}
 
@@ -157,10 +124,10 @@ mainProg:
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 
-	outputPgm(p, c, world, turn)
+	outputPgm(p, c, world, completedTurns)
 
 	c.events <- FinalTurnComplete{
-		turn,
+		completedTurns,
 		calculateAliveCells(p, world),
 	}
 
@@ -168,7 +135,7 @@ mainProg:
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 
-	c.events <- StateChange{turn, Quitting}
+	c.events <- StateChange{completedTurns, Quitting}
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
 	close(c.events)
@@ -199,13 +166,11 @@ func makeWorld(height, width int) [][]byte {
 	return world
 }
 
-func executer(p Params, c distributorChannels, turn int, mu *sync.Mutex, world [][]byte) [][]byte {
+func executer(p Params, c distributorChannels, completedTurns int, mu *sync.Mutex, world [][]byte) [][]byte {
 	var newWorld [][]byte
 
 	if p.Threads == 1 {
-		mu.Lock()
-		newWorld = calculateNextState(c, p.ImageHeight, p.ImageWidth, p.Turns, turn, 0, world)
-		mu.Unlock()
+		newWorld = calculateNextState(c, p, p.ImageWidth, p.Turns, completedTurns, 0, world)
 	} else {
 		//Calculate chunks for the workers
 		chunkHeight := p.ImageHeight / p.Threads
@@ -214,7 +179,7 @@ func executer(p Params, c distributorChannels, turn int, mu *sync.Mutex, world [
 			outyChannels[i] = make(chan [][]byte)
 		}
 		for i := 0; i < p.Threads; i++ {
-			startY := i * chunkHeight
+			startY := i * chunkHeight // chunkHeight
 			endY := (i + 1) * chunkHeight
 			if i == p.Threads-1 {
 				endY = p.ImageHeight
@@ -226,7 +191,7 @@ func executer(p Params, c distributorChannels, turn int, mu *sync.Mutex, world [
 				world,
 				startY,
 				endY,
-				turn,
+				completedTurns,
 				outyChannels[i])
 		}
 		for i := 0; i < p.Threads; i++ {
