@@ -75,47 +75,73 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 
 	go func() {
 		for keys := range keyPress2 {
+			mu.Lock()
 			if keys == 's' {
-				mu.Lock()
-				worldSave := deepCopy2D(world)
+				worldSave := copySliceWorld(world)
 				saveTurn := completedTurns
 				mu.Unlock()
 				outputPgm(p, c, worldSave, saveTurn)
+				continue
 			}
 			if keys == 'q' {
 				quitFlag = true
+				mu.Unlock()
 				return
 			}
 			if keys == 'p' {
 				//pauseChannel <- struct{}{}
 				pauseFlag = !pauseFlag
-				if pauseFlag {
-					c.events <- StateChange{completedTurns, Paused}
-				} else {
-					c.events <- StateChange{completedTurns, Executing}
+				turn2 := completedTurns
+				newState := Paused
+				if !pauseFlag {
+					newState = Executing
 				}
+				mu.Unlock()
+
+				c.events <- StateChange{turn2, newState}
+				continue
 			}
+			mu.Unlock()
 		}
+		mu.Lock()
+		quitFlag = true
+		pauseFlag = false
+		mu.Unlock()
 	}()
 
 	//Start the calculation of new board states
 	for turn = 0; turn < p.Turns; turn++ {
 
-		if quitFlag {
+		mu.Lock()
+		antiRacingQuit := quitFlag
+		antiRacingPause := pauseFlag
+		mu.Unlock()
+
+		if antiRacingQuit {
 			//turn = p.Turns
 			break
 		}
 
-		if pauseFlag {
-			turn -= 1
-		} else {
-			mu.Lock()
-			world = executer(p, c, completedTurns+1, &mu, world)
-			completedTurns++
-			mu.Unlock()
-			c.events <- TurnComplete{
-				completedTurns,
-			}
+		if antiRacingPause {
+			turn--
+			time.Sleep(1 * time.Millisecond)
+			continue
+		}
+
+		mu.Lock()
+		antiRacingTurn := completedTurns + 1
+		antiRacingWorld := world
+		mu.Unlock()
+
+		antiRaceNextWorld := executer(p, c, antiRacingTurn, &mu, antiRacingWorld)
+
+		mu.Lock()
+		world = antiRaceNextWorld
+		completedTurns = antiRacingTurn
+		finalAntiRacingTurn := completedTurns
+		mu.Unlock()
+		c.events <- TurnComplete{
+			finalAntiRacingTurn,
 		}
 	}
 
@@ -149,7 +175,7 @@ func adjustUpDown(a, b int) int {
 	return (a + b) % b
 }
 
-func deepCopy2D(world [][]byte) [][]byte {
+func copySliceWorld(world [][]byte) [][]byte {
 	copyWorld := make([][]byte, len(world))
 	for i := range world {
 		copyWorld[i] = make([]byte, len(world[i]))

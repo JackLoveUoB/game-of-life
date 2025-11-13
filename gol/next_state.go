@@ -9,7 +9,7 @@ func calculateNextState(c distributorChannels, p Params, imageWidth, turns, turn
 		return chunkedWorld
 	}
 	listOfFlippedInner := []util.Cell{}
-	copyWorld := deepCopy2D(chunkedWorld)
+	copyWorld := copySliceWorld(chunkedWorld)
 
 	start := 0
 	end := 0
