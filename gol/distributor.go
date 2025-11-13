@@ -23,6 +23,8 @@ type Args struct {
 }
 
 type BrokerArgs struct {
+	ImageHeight, ImageWidth, Turns int
+	World                          [][]byte
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
@@ -96,21 +98,72 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 		closeClient(p, c, done, turn, world)
 	*/
 	//Establish connection with broker
-	node, err := rpc.Dial("tcp", "localhost:1234")
+	broker, err := rpc.Dial("tcp", "localhost:1234")
 	if err != nil {
 		fmt.Println("Error connecting:", err)
 	}
-	defer node.Close()
+	defer broker.Close()
 
-	//TODO: Get turns from broker
+	//Create the world slice
+	world := makeWorld(p.ImageHeight, p.ImageWidth)
 
-	var world [][]byte
-	node.Call("CalculateNStates")
+	//Fill the world with input
+	c.ioCommand <- ioInput
+	c.ioFilename <- fmt.Sprintf("%dx%d", p.ImageWidth, p.ImageHeight)
+	for y := 0; y < p.ImageHeight; y++ {
+		for x := 0; x < p.ImageWidth; x++ {
+			world[y][x] = <-c.ioInput
+		}
+	}
+
+	turn := 0
+	brokerArgs := BrokerArgs{p.ImageHeight, p.ImageWidth, p.Turns, world}
+	c.events <- StateChange{turn, Executing}
 
 	//TODO: Implement turn count ticker
+	ticker := time.NewTicker(2 * time.Second)
+	done := make(chan bool)
+
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				var result AliveCellsCount
+				_ = broker.Call("Broker.GetAliveCells", brokerArgs, &result)
+				turn = result.CompletedTurns
+				c.events <- result
+			}
+		}
+	}()
+
+	//TODO: Handle keypresses
+	go func() {
+		for key := range keyPress {
+			var callback bool
+			broker.Call("Broker.RegisterKey", key, &callback)
+			if key == 's' {
+				var currentWorld [][]byte
+				broker.Call("Broker.GetWorld", true, &currentWorld)
+				outputPGMImage(p, c, currentWorld)
+			} else if key == 'q' {
+				var currentWorld [][]byte
+				broker.Call("Broker.GetWorld", true, &currentWorld)
+				closeClient(p, c, turn, currentWorld)
+			} //p and k are handled server side - if the server shuts down the client will anyway because world returns
+		}
+	}()
+
+	//TODO: Calculate turns in broker
+	var finalWorld [][]byte
+	_ = broker.Call("Broker.CalculateNStates", brokerArgs, &finalWorld)
+	done <- true
+	fmt.Println("Recieved world, size:", len(finalWorld), "x", len(finalWorld[0]))
+	closeClient(p, c, turn, finalWorld)
 }
 
-func closeClient(p Params, c distributorChannels, done chan bool, turn int, world [][]byte) {
+func closeClient(p Params, c distributorChannels, turn int, world [][]byte) {
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 
 	c.events <- FinalTurnComplete{
@@ -128,7 +181,6 @@ func closeClient(p Params, c distributorChannels, done chan bool, turn int, worl
 	c.events <- StateChange{turn, Quitting}
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
-	done <- true
 	close(c.events)
 }
 
