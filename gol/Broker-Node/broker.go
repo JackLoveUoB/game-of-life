@@ -1,10 +1,10 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"net"
 	"net/rpc"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -15,6 +15,7 @@ type Broker struct {
 	mu         sync.Mutex
 	KeyPresses chan rune
 	Listener   net.Listener
+	Ips        []string
 }
 
 type BrokerArgs struct {
@@ -32,8 +33,28 @@ type AliveCellsCount struct {
 	CellsCount     int
 }
 
+type WorldState struct {
+	Turn  int
+	World [][]byte
+}
+
+type ipList []string
+
+func (i *ipList) String() string {
+	return fmt.Sprint(*i)
+}
+
+func (i *ipList) Set(value string) error {
+	*i = append(*i, value)
+	return nil
+}
+
 func main() {
 	//TODO: handle connections
+	var ips ipList
+	flag.Var(&ips, "ip", "IP address to include (can be repeated)")
+	flag.Parse()
+
 	broker := new(Broker)
 	rpc.Register(broker)
 
@@ -45,22 +66,46 @@ func main() {
 
 	broker.KeyPresses = make(chan rune, 10)
 	broker.Listener = listener
+	broker.Ips = ips
 
 	rpc.Accept(listener)
 }
 
+func (broker *Broker) InitBroker(args BrokerArgs, result *bool) error {
+	fmt.Println("Initialising Broker")
+	broker.mu.Lock()
+	broker.world = copySliceWorld(args.World)
+	broker.turn = 0
+	// drain any leftover keypresses so old keys don't affect this run
+	func(ch chan rune) {
+		for {
+			select {
+			case <-ch:
+				//this gets rid of a press in ch
+			default:
+				return
+			}
+		}
+	}(broker.KeyPresses)
+	broker.mu.Unlock()
+	fmt.Println("Broker initialised!")
+
+	*result = true
+	return nil
+}
+
 func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error {
 	if args.Turns == 0 {
+		fmt.Println("No turns, sending back initial world")
 		*result = copySliceWorld(args.World)
 		return nil
 	}
-	numNodes := 2
+	numNodes := len(broker.Ips)
 	nodes := make([]*rpc.Client, numNodes)
-	port := 9876
 	//Establish connection with node
 
 	for i := 0; i < numNodes; i++ {
-		node, err := rpc.Dial("tcp", "localhost:"+strconv.Itoa(port+i))
+		node, err := rpc.Dial("tcp", broker.Ips[i])
 		if err != nil {
 			fmt.Println("Error connecting:", err)
 		}
@@ -69,20 +114,15 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 	}
 
 	//Initialise variables
-	world := args.World
+	world := copySliceWorld(args.World)
 	keypress := broker.KeyPresses
 	pauseFlag := false
 
 	//TODO: send work to the nodes
+	fmt.Println("Calculating", args.Turns, "turns on world size", args.ImageHeight, "x", args.ImageWidth, "using", numNodes, "nodes...")
 	for t := 0; t < args.Turns; t++ {
 		//Update arguments
 		//nodeArgs.World = world
-
-		//Update struct data
-		broker.mu.Lock()
-		broker.turn = t
-		broker.world = world
-		broker.mu.Unlock()
 
 		// TODO: handle key presses
 		select {
@@ -90,6 +130,7 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 			switch key {
 			case 'p':
 				pauseFlag = !pauseFlag
+				fmt.Println("Paused:", pauseFlag)
 			case 'k':
 				fmt.Println("k - closing nodes and broker")
 				var dummy bool
@@ -102,10 +143,14 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 				}() //allow time for the world to be sent back to the distributor
 				*result = world
 				return nil
-			} //It still processes needlessly after q but trying to stop it causes race conditions
+			case 'q':
+				time.Sleep(100 * time.Millisecond) //to allow time for distributor to quit gracefully
+				fmt.Println("Ending processing early!")
+				*result = world
+				return nil
+			}
 		default:
 			if !pauseFlag {
-				fmt.Println("Calculating Next State")
 				chunks := chunkWorld(numNodes, world)
 				calculatedChunks := make([][][]byte, numNodes)
 				trimmedChunks := make([][][]byte, numNodes)
@@ -137,27 +182,40 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 				}
 				world = copySliceWorld(writeWorld)
 			} else {
-				fmt.Println("Paused")
 				t--
 			}
-
+			//Update struct data
+			broker.mu.Lock()
+			broker.turn = t + 1
+			broker.world = world
+			broker.mu.Unlock()
 		}
 	}
-
+	fmt.Println("Done! Sending world with size", len(world), "x", len(world[0]))
 	*result = world
 	return nil
 }
 
 func (broker *Broker) RegisterKey(key rune, result *bool) error {
-	fmt.Println("recieved", key)
+	if key == 's' {
+		// 's' is a distributor-only snapshot request; ignore it here.
+		*result = true
+		return nil
+	}
+	fmt.Println("recieved", string(key))
 	broker.KeyPresses <- key
 	return nil
 }
 
-func (broker *Broker) GetWorld(args bool, result *[][]byte) error {
+func (broker *Broker) GetWorld(args bool, result *WorldState) error {
 	broker.mu.Lock()
-	*result = broker.world
+	world := copySliceWorld(broker.world)
+	// log number of live cells at time of request
+	live := calculateNumAliveCells(len(world), len((world)[0]), world)
+	turn := broker.turn
 	broker.mu.Unlock()
+	fmt.Printf("GetWorld: sending world (alive=%d, turn=%d)\n", live, turn)
+	*result = WorldState{World: world, Turn: turn}
 	return nil
 }
 
@@ -168,6 +226,8 @@ func (broker *Broker) GetAliveCells(args BrokerArgs, result *AliveCellsCount) er
 	turns := broker.turn
 	world := broker.world
 	broker.mu.Unlock()
+
+	//fmt.Println("Getting live cells for world:", len(world), "x", len(world[0]))
 
 	//Calculate the number
 	liveCells := calculateNumAliveCells(args.ImageHeight, args.ImageWidth, world)
