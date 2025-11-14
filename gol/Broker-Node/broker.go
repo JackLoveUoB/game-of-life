@@ -50,6 +50,10 @@ func main() {
 }
 
 func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error {
+	if args.Turns == 0 {
+		*result = copySliceWorld(args.World)
+		return nil
+	}
 	numNodes := 2
 	nodes := make([]*rpc.Client, numNodes)
 	port := 9876
@@ -102,34 +106,36 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 		default:
 			if !pauseFlag {
 				fmt.Println("Calculating Next State")
-				chunks := chunkWorld(args.ImageHeight, numNodes, world)
+				chunks := chunkWorld(numNodes, world)
 				calculatedChunks := make([][][]byte, numNodes)
+				trimmedChunks := make([][][]byte, numNodes)
 
 				wg := sync.WaitGroup{}
 				wg.Add(numNodes)
 				for i, node := range nodes {
-					nodeArgs := NodeArgs{len(chunks[0]), len(chunks[0][0]), args.Turns, copy2D(chunks[i])}
+					chunk := chunks[i]
+					nodeArgs := NodeArgs{
+						len(chunks[i]),
+						len(chunks[i][0]),
+						args.Turns,
+						copySliceWorld(chunk)}
 					go func(currentNode *rpc.Client, args NodeArgs, n int) {
 						defer wg.Done()
 						result := make([][]byte, args.ImageHeight)
 						_ = currentNode.Call("Node.CalculateNextState", args, &result)
 						//need to trim result
-						if n == 0 {
-							calculatedChunks[n] = result[:len(result)-1] // keep all but bottom overlap
-						} else if n == numNodes-1 {
-							calculatedChunks[n] = result[1:] // keep all but top overlap
-						} else {
-							calculatedChunks[n] = result[1 : len(result)-1] // trim both overlaps
-						}
+						calculatedChunks[n] = result
+						//trim that bitch :D
+						trimmedChunks[n] = result[1 : len(result)-1]
 					}(node, nodeArgs, i)
 				}
 				wg.Wait()
 				//assemble world
 				var writeWorld [][]byte
-				for _, chunk := range calculatedChunks {
+				for _, chunk := range trimmedChunks {
 					writeWorld = append(writeWorld, chunk...)
 				}
-				world = copy2D(writeWorld)
+				world = copySliceWorld(writeWorld)
 			} else {
 				fmt.Println("Paused")
 				t--
@@ -185,25 +191,48 @@ func calculateNumAliveCells(imageHeight, imageWidth int, world [][]byte) int {
 }
 
 // Calculate chunks for the nodes
-func chunkWorld(imageHeight, numNodes int, world [][]byte) [][][]byte {
-	result := make([][][]byte, numNodes)
-	chunkHeight := imageHeight / numNodes
+func chunkWorld(numNodes int, world [][]byte) [][][]byte {
+	chunkResult := make([][][]byte, numNodes)
+	initialHeight := len(world)
+	width := len(world[0])
+	chunkWeWant := initialHeight / numNodes
+	chunkHalos := initialHeight % numNodes
+
+	startY := 0
 	for i := 0; i < numNodes; i++ {
-		start := (i * chunkHeight) - 1
-		if start < 0 {
-			start = 0
+		usedHeight := chunkWeWant
+		if i < chunkHalos {
+			usedHeight++
 		}
-		end := ((i + 1) * chunkHeight) + 1
-		if i == numNodes-1 {
-			end = imageHeight
+		endY := startY + usedHeight
+
+		chunk := make([][]byte, usedHeight+2)
+		//startY := (i * chunkHeight) //- 1
+		//if startY < 0 {
+		//	startY = 0
+		//}
+
+		topHalo := (startY - 1 + initialHeight) % initialHeight
+		bottomHalo := endY % initialHeight
+
+		chunk[0] = make([]byte, width)
+		copy(chunk[0], world[topHalo])
+
+		for y := 0; y < usedHeight; y++ {
+			chunk[y+1] = make([]byte, width)
+			copy(chunk[y+1], world[startY+y])
 		}
 
-		result[i] = copy2D(world[start:end])
+		chunk[usedHeight+1] = make([]byte, width)
+		copy(chunk[usedHeight+1], world[bottomHalo])
+
+		chunkResult[i] = chunk
+		startY = endY
 	}
-	return result
+	return chunkResult
 }
 
-func copy2D(world [][]byte) [][]byte {
+func copySliceWorld(world [][]byte) [][]byte {
 	copyWorld := make([][]byte, len(world))
 	for i := range world {
 		copyWorld[i] = make([]byte, len(world[i]))

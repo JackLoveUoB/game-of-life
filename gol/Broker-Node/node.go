@@ -48,8 +48,8 @@ func (node *Node) CalculateNextState(args NodeArgs, result *[][]byte) error {
 		return nil
 	}
 
-	copyWorld := copy2D(world)
-	for i := 0; i < len(world); i++ { //each row
+	copyWorld := copySliceWorld(world)
+	for i := 1; i < len(world)-1; i++ { //each row
 		for j := 0; j < len(world[i]); j++ { //each cell
 			alive := 0
 			adjacentAlive := 0
@@ -61,7 +61,7 @@ func (node *Node) CalculateNextState(args NodeArgs, result *[][]byte) error {
 					if k == 0 && m == 0 {
 						continue
 					}
-					newi := adjustUpDown(i+k, args.ImageHeight)
+					newi := i + k
 					newj := adjustLeftRight(j+m, args.ImageWidth)
 					if world[newi][newj] == 255 {
 						adjacentAlive++
@@ -83,6 +83,7 @@ func (node *Node) CalculateNextState(args NodeArgs, result *[][]byte) error {
 		}
 
 	}
+
 	*result = copyWorld
 	return nil
 }
@@ -95,7 +96,7 @@ func adjustUpDown(a, b int) int {
 	return (a + b) % b
 }
 
-func copy2D(world [][]byte) [][]byte {
+func copySliceWorld(world [][]byte) [][]byte {
 	copyWorld := make([][]byte, len(world))
 	for i := range world {
 		copyWorld[i] = make([]byte, len(world[i]))
