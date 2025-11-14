@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/rpc"
 	"time"
+
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -122,9 +123,11 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 
 	//TODO: Implement turn count ticker
 	ticker := time.NewTicker(2 * time.Second)
-	done := make(chan bool)
+	done := make(chan struct{})
+	stopped := make(chan struct{})
 
 	go func() {
+		defer close(stopped)
 		for {
 			select {
 			case <-done:
@@ -158,7 +161,9 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 	//TODO: Calculate turns in broker
 	var finalWorld [][]byte
 	_ = broker.Call("Broker.CalculateNStates", brokerArgs, &finalWorld)
-	done <- true
+	close(done)
+	ticker.Stop()
+	<-stopped
 	fmt.Println("Recieved world, size:", len(finalWorld), "x", len(finalWorld[0]))
 	closeClient(p, c, turn, finalWorld)
 }
