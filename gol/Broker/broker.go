@@ -58,11 +58,11 @@ func main() {
 	broker := new(Broker)
 	rpc.Register(broker)
 
-	listener, err := net.Listen("tcp", ":1234")
+	listener, err := net.Listen("tcp", ":1235")
 	if err != nil {
 		fmt.Println("Error listening:", err)
 	}
-	fmt.Println("Listening on port 1234...")
+	fmt.Println("Listening on port 1235...")
 
 	broker.KeyPresses = make(chan rune, 10)
 	broker.Listener = listener
@@ -103,11 +103,14 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 	numNodes := len(broker.Ips)
 	nodes := make([]*rpc.Client, numNodes)
 	//Establish connection with node
-
+	fmt.Println("nodes:", numNodes)
 	for i := 0; i < numNodes; i++ {
 		node, err := rpc.Dial("tcp", broker.Ips[i])
+		fmt.Println("dialed")
 		if err != nil {
 			fmt.Println("Error connecting:", err)
+		} else {
+			fmt.Println("Connected to node on ip", broker.Ips[i])
 		}
 		nodes[i] = node
 		defer node.Close()
@@ -167,7 +170,7 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 					go func(currentNode *rpc.Client, args NodeArgs, n int) {
 						defer wg.Done()
 						result := make([][]byte, args.ImageHeight)
-						_ = currentNode.Call("Node.CalculateNextState", args, &result)
+						_ = currentNode.Call("Node.CalculateNextState2", args, &result)
 						//need to trim result
 						calculatedChunks[n] = result
 						//trim that bitch :D
@@ -231,6 +234,8 @@ func (broker *Broker) GetAliveCells(args BrokerArgs, result *AliveCellsCount) er
 
 	//Calculate the number
 	liveCells := calculateNumAliveCells(args.ImageHeight, args.ImageWidth, world)
+
+	fmt.Println("Currently on turn", turns, "with", liveCells, "alive cells")
 
 	//Send the info back
 	aliveCellsCount := AliveCellsCount{CompletedTurns: turns, CellsCount: liveCells}

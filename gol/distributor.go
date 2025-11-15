@@ -37,7 +37,7 @@ type WorldState struct {
 func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 
 	//Establish connection with broker
-	broker, err := rpc.Dial("tcp", "localhost:1234")
+	broker, err := rpc.Dial("tcp", "localhost:1235")
 	if err != nil {
 		fmt.Println("Error connecting:", err)
 	}
