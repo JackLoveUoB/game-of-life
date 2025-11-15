@@ -167,12 +167,26 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 	close(c.events)
 }
 
-func adjustLeftRight(a, b int) int {
-	return (a + b) % b
+//go:noinline
+func adjustLeftRight(finalX, width int) int {
+	if finalX < 0 {
+		return width - 1
+	}
+	if finalX >= width {
+		return 0
+	}
+	return finalX
 }
 
-func adjustUpDown(a, b int) int {
-	return (a + b) % b
+//go:noinline
+func adjustUpDown(finalY, height int) int {
+	if finalY < 0 {
+		return height - 1
+	}
+	if finalY >= height {
+		return 0
+	}
+	return finalY
 }
 
 func copySliceWorld(world [][]byte) [][]byte {
@@ -196,7 +210,7 @@ func executer(p Params, c distributorChannels, completedTurns int, mu *sync.Mute
 	var newWorld [][]byte
 
 	if p.Threads == 1 {
-		newWorld = calculateNextState(c, p, p.ImageWidth, p.Turns, completedTurns, 0, world)
+		newWorld = calculateNextState(c, p, p.Turns, completedTurns, 0, world)
 	} else {
 		//Calculate chunks for the workers
 		chunkHeight := p.ImageHeight / p.Threads
