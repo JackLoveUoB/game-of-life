@@ -7,15 +7,19 @@ import (
 	"net/rpc"
 	"sync"
 	"time"
+	"uk.ac.bris.cs/gameoflife/util"
 )
 
 type Broker struct {
-	turn       int
-	world      [][]byte
-	mu         sync.Mutex
-	KeyPresses chan rune
-	Listener   net.Listener
-	Ips        []string
+	turn         int
+	world        [][]byte
+	mu           sync.Mutex
+	KeyPresses   chan rune
+	Listener     net.Listener
+	Ips          []string
+	Client       *rpc.Client
+	ClientClosed bool
+	rcpWg        sync.WaitGroup
 }
 
 type BrokerArgs struct {
@@ -36,6 +40,16 @@ type AliveCellsCount struct {
 type WorldState struct {
 	Turn  int
 	World [][]byte
+}
+
+type NodeReturn struct {
+	World   [][]byte
+	Flipped []util.Cell
+}
+
+type CellsFlipped struct { // implements Event
+	CompletedTurns int
+	Cells          []util.Cell
 }
 
 type ipList []string
@@ -73,6 +87,8 @@ func main() {
 
 func (broker *Broker) InitBroker(args BrokerArgs, result *bool) error {
 	fmt.Println("Initialising Broker")
+	broker.Client, _ = rpc.Dial("tcp", "localhost:2556")
+	broker.ClientClosed = false
 	broker.mu.Lock()
 	broker.world = copySliceWorld(args.World)
 	broker.turn = 0
@@ -94,6 +110,16 @@ func (broker *Broker) InitBroker(args BrokerArgs, result *bool) error {
 	return nil
 }
 
+func (broker *Broker) DisconnectClient(args bool, result *bool) error {
+	broker.Client.Close()
+	broker.ClientClosed = true
+	fmt.Println("Stopped connection with client")
+	broker.rcpWg.Wait()
+	fmt.Println("No more calls being sent")
+	//add in some fault tolerance here
+	return nil
+}
+
 func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error {
 	if args.Turns == 0 {
 		fmt.Println("No turns, sending back initial world")
@@ -106,7 +132,6 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 	fmt.Println("nodes:", numNodes)
 	for i := 0; i < numNodes; i++ {
 		node, err := rpc.Dial("tcp", broker.Ips[i])
-		fmt.Println("dialed")
 		if err != nil {
 			fmt.Println("Error connecting:", err)
 		} else {
@@ -157,6 +182,7 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 				chunks := chunkWorld(numNodes, world)
 				calculatedChunks := make([][][]byte, numNodes)
 				trimmedChunks := make([][][]byte, numNodes)
+				nodeReturn := new(NodeReturn)
 
 				wg := sync.WaitGroup{}
 				wg.Add(numNodes)
@@ -169,12 +195,12 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 						copySliceWorld(chunk)}
 					go func(currentNode *rpc.Client, args NodeArgs, n int) {
 						defer wg.Done()
-						result := make([][]byte, args.ImageHeight)
-						_ = currentNode.Call("Node.CalculateNextState2", args, &result)
+						_ = currentNode.Call("Node.CalculateNextState2", args, &nodeReturn)
 						//need to trim result
-						calculatedChunks[n] = result
+						calculatedChunks[n] = nodeReturn.World
 						//trim that bitch :D
-						trimmedChunks[n] = result[1 : len(result)-1]
+						trimmedChunks[n] = nodeReturn.World[1 : len(nodeReturn.World)-1]
+						nodeReturn.Flipped = nodeReturn.Flipped[1 : len(nodeReturn.Flipped)-1]
 					}(node, nodeArgs, i)
 				}
 				wg.Wait()
@@ -184,6 +210,16 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 					writeWorld = append(writeWorld, chunk...)
 				}
 				world = copySliceWorld(writeWorld)
+
+				if !broker.ClientClosed {
+					broker.rcpWg.Add(1)
+					var dummy bool
+					_ = broker.Client.Call("Client.TurnComplete", CellsFlipped{t + 1, nodeReturn.Flipped}, &dummy)
+					broker.rcpWg.Done()
+				} else {
+					fmt.Println("ENDING EARLY HERE")
+					return nil
+				}
 			} else {
 				t--
 			}

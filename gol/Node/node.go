@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
+	"uk.ac.bris.cs/gameoflife/util"
 )
 
 type Node struct {
@@ -14,6 +15,11 @@ type Node struct {
 type NodeArgs struct {
 	ImageHeight, ImageWidth, Turns int
 	World                          [][]byte
+}
+
+type NodeReturn struct {
+	World   [][]byte
+	Flipped []util.Cell
 }
 
 func main() {
@@ -40,58 +46,11 @@ func (node *Node) CloseNode(args bool, result *bool) error {
 	return nil
 }
 
-func (node *Node) CalculateNextState(args NodeArgs, result *[][]byte) error {
-	fmt.Println("Calculating a turn, world size:", len(args.World), len(args.World[5]))
-	world := args.World
-	if args.Turns == 0 {
-		*result = world
-		return nil
-	}
-
-	copyWorld := copySliceWorld(world)
-	for i := 1; i < len(world)-1; i++ { //each row
-		for j := 0; j < len(world[i]); j++ { //each cell
-			alive := 0
-			adjacentAlive := 0
-			if world[i][j] == 255 {
-				alive = 1
-			}
-			for k := -1; k <= 1; k++ {
-				for m := -1; m <= 1; m++ {
-					if k == 0 && m == 0 {
-						continue
-					}
-					newi := i + k
-					newj := adjustLeftRight(j+m, args.ImageWidth)
-					if world[newi][newj] == 255 {
-						adjacentAlive++
-					}
-				}
-			}
-			if alive == 1 {
-				if adjacentAlive < 2 || adjacentAlive > 3 {
-					copyWorld[i][j] = 0
-				} else {
-					copyWorld[i][j] = 255
-				}
-			} else {
-				if adjacentAlive == 3 {
-					copyWorld[i][j] = 255
-				}
-			}
-
-		}
-
-	}
-
-	*result = copyWorld
-	return nil
-}
-
 // wrapping is not handled here - handle it when sending the args
-func (node *Node) CalculateNextState2(args NodeArgs, result *[][]byte) error {
+func (node *Node) CalculateNextState2(args NodeArgs, result *NodeReturn) error {
 	writeWorld := makeWorld(args.ImageHeight, args.ImageWidth)
 	oldWorld := args.World
+	_result := NodeReturn{oldWorld, make([]util.Cell, 0)}
 	//fmt.Println("Calculating state: old world", len(oldWorld), "x", len(oldWorld[0]), "| new world", len(writeWorld), "x", len(writeWorld[0]))
 	for y := 0; y < len(oldWorld); y++ {
 		for x := 0; x < len(oldWorld[0]); x++ {
@@ -101,12 +60,19 @@ func (node *Node) CalculateNextState2(args NodeArgs, result *[][]byte) error {
 				writeWorld[y][x] = oldWorld[y][x]
 			case 3: //cell with 3 neighbours becomes alive
 				writeWorld[y][x] = 255
+				if oldWorld[y][x] == 0 && y < len(oldWorld)-2 {
+					_result.Flipped = append(_result.Flipped, util.Cell{x, y})
+				}
 			default: //otherwise it's dead
 				writeWorld[y][x] = 0
+				if oldWorld[y][x] == 255 && y < len(oldWorld)-2 {
+					_result.Flipped = append(_result.Flipped, util.Cell{x, y})
+				}
 			}
 		}
 	}
-	*result = writeWorld
+	_result.World = writeWorld
+	*result = _result
 	return nil
 }
 
@@ -149,14 +115,6 @@ func makeWorld(height, width int) [][]byte {
 		world[i] = make([]byte, width)
 	}
 	return world
-}
-
-func adjustLeftRight(a, b int) int {
-	return (a + b) % b
-}
-
-func adjustUpDown(a, b int) int {
-	return (a + b) % b
 }
 
 func copySliceWorld(world [][]byte) [][]byte {

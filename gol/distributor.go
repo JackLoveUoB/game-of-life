@@ -2,7 +2,9 @@ package gol
 
 import (
 	"fmt"
+	"net"
 	"net/rpc"
+	"sync"
 	"time"
 
 	"uk.ac.bris.cs/gameoflife/util"
@@ -33,6 +35,16 @@ type WorldState struct {
 	World [][]byte
 }
 
+type Client struct {
+	p       Params
+	c       distributorChannels
+	eventWG sync.WaitGroup
+}
+
+type Coord struct {
+	Y, X int
+}
+
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 
@@ -43,16 +55,37 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 	}
 	defer broker.Close()
 
+	//Listen for broker
+	fmt.Println("Initialised Client")
+	client := new(Client)
+	client.p = p
+	client.c = c
+	rpc.Register(client)
+	listener, err := net.Listen("tcp", ":2556")
+	if err != nil {
+		fmt.Println("Error listening:", err)
+	}
+
+	go rpc.Accept(listener)
+
 	//Create the World slice
 	world := makeWorld(p.ImageHeight, p.ImageWidth)
 
 	//Fill the World with input
+	listOfAlive := []util.Cell{}
 	c.ioCommand <- ioInput
 	c.ioFilename <- fmt.Sprintf("%dx%d", p.ImageWidth, p.ImageHeight)
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
 			world[y][x] = <-c.ioInput
+			if world[y][x] == 255 {
+				listOfAlive = append(listOfAlive, util.Cell{x, y})
+			}
 		}
+	}
+	c.events <- CellsFlipped{
+		0,
+		listOfAlive,
 	}
 
 	turn := 0
@@ -78,7 +111,7 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 
 	//TODO: Implement turn count ticker
 	ticker := time.NewTicker(2 * time.Second)
-	done := make(chan struct{})
+	done := make(chan bool)
 	//stopped := make(chan struct{})
 
 	go func() {
@@ -129,26 +162,32 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 		finalWorld = copySliceWorld(state.World)
 
 		fmt.Println("Recieved World, size:", len(finalWorld), "x", len(finalWorld[0]))
-		done <- struct{}{}
-		closeClient(p, c, state.Turn, done, ticker, finalWorld)
+		//done <- true
+		closeClient(p, c, state.Turn, done, ticker, listener, broker, client, finalWorld)
 	case <-errChan:
 		fmt.Println("GOT RESULT")
 		fmt.Println("Recieved World, size:", len(finalWorld), "x", len(finalWorld[0]))
-		done <- struct{}{}
-		closeClient(p, c, p.Turns, done, ticker, finalWorld) //use p.turns as after it is done, the #turns completed = #turns given
+		//done <- true
+		closeClient(p, c, p.Turns, done, ticker, listener, broker, client, finalWorld) //use p.turns as after it is done, the #turns completed = #turns given
 	}
 }
 
-func closeClient(p Params, c distributorChannels, turn int, tickerDone chan struct{}, ticker *time.Ticker, world [][]byte) {
+func closeClient(p Params, c distributorChannels, turn int, tickerDone chan bool, ticker *time.Ticker, listener net.Listener, rpcClient *rpc.Client, clientStruct *Client, world [][]byte) {
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 	//tickerDone <- struct{}{}
 	fmt.Println("CLOSING CLIENT")
+	tickerDone <- true
 	ticker.Stop()
 
 	c.events <- FinalTurnComplete{
 		turn,
 		calculateAliveCells(p, world),
 	}
+
+	listener.Close()
+
+	var dummy bool
+	rpcClient.Call("Broker.DisconnectClient", true, &dummy)
 
 	//Output PGM image
 	outputPGMImage(p, c, turn, world)
@@ -157,6 +196,7 @@ func closeClient(p Params, c distributorChannels, turn int, tickerDone chan stru
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 
+	clientStruct.eventWG.Wait()
 	c.events <- StateChange{turn, Quitting}
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
@@ -182,6 +222,16 @@ func outputPGMImage(p Params, c distributorChannels, turn int, world [][]byte) {
 		turn,
 		imageName,
 	}
+}
+
+func (client *Client) TurnComplete(args CellsFlipped, result *bool) error {
+	client.eventWG.Add(1)
+	defer client.eventWG.Done()
+
+	client.c.events <- TurnComplete{CompletedTurns: args.CompletedTurns}
+	client.c.events <- CellsFlipped{args.CompletedTurns, args.Cells}
+	*result = true
+	return nil
 }
 
 func newCell(x, y int) util.Cell {
