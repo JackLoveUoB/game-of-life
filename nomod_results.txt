@@ -1,0 +1,6 @@
+BenchmarkGolSingleThread/512x512x1000-1-16         	       1	10498147895 ns/op
+BenchmarkGolSingleThread/512x512x1000-1-16         	       2	10480322452 ns/op
+BenchmarkGolSingleThread/512x512x1000-1-16         	       3	10897399195 ns/op
+BenchmarkGolSingleThread/512x512x1000-1-16         	       4	10397953685 ns/op
+BenchmarkGolSingleThread/512x512x1000-1-16         	       5	10395062617 ns/op
+

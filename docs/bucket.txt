@@ -1,0 +1,31 @@
+bucket to hold code
+
+//go:noinline
+func adjustLeftRight(finalX, width int) int {
+	if finalX < 0 {
+		return width - 1
+	}
+	if finalX >= width {
+		return 0
+	}
+	return finalX
+}
+
+//go:noinline
+func adjustUpDown(finalY, height int) int {
+	if finalY < 0 {
+		return height - 1
+	}
+	if finalY >= height {
+		return 0
+	}
+	return finalY
+}
+
+
+finalY := adjustUpDown(rowIndex+yDif, p.ImageHeight)
+
+finalX := adjustLeftRight(columnIndex+xDif, p.ImageWidth)
+
+
+

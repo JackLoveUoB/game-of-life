@@ -18,16 +18,17 @@ func BenchmarkGol(b *testing.B) {
 
 	log.SetOutput(io.Discard)
 
-	for threads := 1; threads <= 16; threads++ {
+	for threads := 1; threads <= 1; threads++ {
 		//os.Stdout = nil // Disable all program output apart from benchmark results
 		p := gol.Params{
 			Turns:       benchLength,
-			Threads:     threads,
+			Threads:     1,
 			ImageWidth:  512,
 			ImageHeight: 512,
 		}
 		name := fmt.Sprintf("%dx%dx%d-%d", p.ImageWidth, p.ImageHeight, p.Turns, p.Threads)
 		b.Run(name, func(b *testing.B) {
+			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				events := make(chan gol.Event)
 				go gol.Run(p, events, nil)

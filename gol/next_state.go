@@ -4,7 +4,8 @@ import (
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
-func calculateNextState(c distributorChannels, p Params, imageWidth, turns, turn, startY int, chunkedWorld [][]byte) [][]byte {
+//go:noinline
+func calculateNextState(c distributorChannels, p Params, turns, turn, startY int, chunkedWorld [][]byte) [][]byte {
 	if turns == 0 {
 		return chunkedWorld
 	}
@@ -33,30 +34,13 @@ func calculateNextState(c distributorChannels, p Params, imageWidth, turns, turn
 
 		for j := 0; j < len(chunkedWorld[i]); j++ { //each cell
 			alive := false
-			adjacentAlive := 0
+			//adjacentAlive := 0
 
 			if chunkedWorld[i][j] == 255 {
 				alive = true
 			}
-			for k := -1; k <= 1; k++ {
-				for m := -1; m <= 1; m++ {
-					if k == 0 && m == 0 {
-						continue
-					}
-					//newi := adjustUpDown(i+k, imageHeight)
-					newi := 0
-					if len(chunkedWorld) == p.ImageHeight {
-						newi = adjustUpDown(i+k, p.ImageHeight)
-					} else {
-						newi = i + k
-					}
-					//newi = i + k
-					newj := adjustLeftRight(j+m, imageWidth)
-					if chunkedWorld[newi][newj] == 255 {
-						adjacentAlive++
-					}
-				}
-			}
+
+			adjacentAlive := findNeighbours(p, i, j, chunkedWorld)
 
 			if alive == true {
 				if adjacentAlive < 2 || adjacentAlive > 3 {

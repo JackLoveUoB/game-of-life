@@ -1,52 +1,55 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 
-# Read in the CSV produced from the benchmark.
-# - skip the first 2 rows (metadata)
-# - no header row in the actual data section, so header=None
-# - manually name the columns
+# Read whitespace-separated benchmark output:
+#   BenchmarkGol/512x512x1000-1-16   1   18924333933 ns/op
 benchmark_data = pd.read_csv(
-    'results.csv',
-    skiprows=2,
+    "results.csv",
+    delim_whitespace=True,
     header=None,
-    names=['name', 'time', 'ci']
+    names=["name", "iters", "time_ns", "unit"],
 )
 
-# Keep only the rows that are actual benchmark lines (start with 'Gol/')
-benchmark_data = benchmark_data[benchmark_data['name'].str.startswith('Gol/')]
+# Keep only our Gol benchmark lines (paranoid filter)
+benchmark_data = benchmark_data[
+    benchmark_data["name"].str.startswith("BenchmarkGol/512x512x1000-")
+]
 
-# Convert time column (already in seconds per op) to numeric
-benchmark_data['time'] = pd.to_numeric(benchmark_data['time'])
+# Convert time_ns to numeric (it’s just the integer number of ns/op)
+benchmark_data["time_ns"] = pd.to_numeric(benchmark_data["time_ns"], errors="coerce")
 
-# Extract the number of threads from names like 'Gol/512x512x1000-4-16'
-# This regex grabs the "4" from that example.
-benchmark_data['threads'] = (
-    benchmark_data['name']
-    .str.extract(r'Gol/512x512x1000-(\d+)-16')[0]
+# Drop anything that failed to parse (should be none if the file is clean)
+benchmark_data = benchmark_data.dropna(subset=["time_ns"])
+
+# Convert to seconds per op for readability
+benchmark_data["time_sec"] = benchmark_data["time_ns"] / 1e9
+
+# Extract number of threads from e.g. BenchmarkGol/512x512x1000-8-16
+benchmark_data["threads"] = (
+    benchmark_data["name"]
+    .str.extract(r"BenchmarkGol/512x512x1000-(\d+)-16")[0]
     .astype(int)
 )
 
-# (Optional but nice): sort by thread count so the x-axis is ordered
-benchmark_data = benchmark_data.sort_values('threads')
+# Sort by thread count so the line graph isn’t scrambled
+benchmark_data = benchmark_data.sort_values("threads")
 
 print(benchmark_data)
 
-# Plot a bar chart: threads vs time (sec/op)
-ax = sns.barplot(
-    data=benchmark_data,
-    x='threads',
-    y='time',
-    hue='threads',
-    palette='tab10',
-    legend=False
+# ---- Line graph: threads vs time_sec ----
+plt.figure(figsize=(8, 5))
+plt.plot(
+    benchmark_data["threads"],
+    benchmark_data["time_sec"],
+    marker="o",
 )
 
-# Set descriptive axis labels.
-ax.set(
-    xlabel='Worker threads used',
-    ylabel='Time per run (sec/op)'
-)
+plt.xlabel("Worker threads used")
+plt.ylabel("Time per run (seconds per op)")
+plt.title("Game of Life 512x512x1000: time vs threads")
+plt.grid(True)
+plt.xticks(benchmark_data["threads"])  # discrete ticks at 1..16
 
 plt.tight_layout()
+plt.savefig("benchmark_threads_vs_time.png", dpi=200)
 plt.show()
