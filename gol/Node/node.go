@@ -47,10 +47,9 @@ func (node *Node) CloseNode(args bool, result *bool) error {
 }
 
 // wrapping is not handled here - handle it when sending the args
-func (node *Node) CalculateNextState2(args NodeArgs, result *NodeReturn) error {
+func (node *Node) CalculateNextState2(args NodeArgs, result *[][]byte) error {
 	writeWorld := makeWorld(args.ImageHeight, args.ImageWidth)
 	oldWorld := args.World
-	_result := NodeReturn{oldWorld, make([]util.Cell, 0)}
 	//fmt.Println("Calculating state: old world", len(oldWorld), "x", len(oldWorld[0]), "| new world", len(writeWorld), "x", len(writeWorld[0]))
 	for y := 0; y < len(oldWorld); y++ {
 		for x := 0; x < len(oldWorld[0]); x++ {
@@ -60,19 +59,14 @@ func (node *Node) CalculateNextState2(args NodeArgs, result *NodeReturn) error {
 				writeWorld[y][x] = oldWorld[y][x]
 			case 3: //cell with 3 neighbours becomes alive
 				writeWorld[y][x] = 255
-				if oldWorld[y][x] == 0 && y < len(oldWorld)-2 {
-					_result.Flipped = append(_result.Flipped, util.Cell{x, y})
-				}
 			default: //otherwise it's dead
 				writeWorld[y][x] = 0
-				if oldWorld[y][x] == 255 && y < len(oldWorld)-2 {
-					_result.Flipped = append(_result.Flipped, util.Cell{x, y})
+				if oldWorld[y][x] == 255 && y > 0 && y < len(oldWorld)-1 {
 				}
 			}
 		}
 	}
-	_result.World = writeWorld
-	*result = _result
+	*result = writeWorld
 	return nil
 }
 

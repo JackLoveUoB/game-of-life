@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/rpc"
-	"sync"
 	"time"
-
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -28,6 +26,7 @@ type Args struct {
 type BrokerArgs struct {
 	ImageHeight, ImageWidth, Turns int
 	World                          [][]byte
+	DistPort                       string
 }
 
 type WorldState struct {
@@ -36,18 +35,12 @@ type WorldState struct {
 }
 
 type Client struct {
-	p       Params
-	c       distributorChannels
-	eventWG sync.WaitGroup
-}
-
-type Coord struct {
-	Y, X int
+	p Params
+	c distributorChannels
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
 func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
-
 	//Establish connection with broker
 	broker, err := rpc.Dial("tcp", "localhost:1235")
 	if err != nil {
@@ -60,13 +53,21 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 	client := new(Client)
 	client.p = p
 	client.c = c
-	rpc.Register(client)
-	listener, err := net.Listen("tcp", ":2556")
-	if err != nil {
-		fmt.Println("Error listening:", err)
-	}
+	clientRpcServer := rpc.NewServer()
+	clientRpcServer.Register(client)
 
-	go rpc.Accept(listener)
+	listener, _ := net.Listen("tcp", ":0")
+	stopConn := make(chan struct{})
+	go func() {
+		defer close(stopConn)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		go clientRpcServer.ServeConn(conn)
+	}()
+
+	fmt.Println("Listening for broker on " + listener.Addr().String())
 
 	//Create the World slice
 	world := makeWorld(p.ImageHeight, p.ImageWidth)
@@ -89,7 +90,7 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 	}
 
 	turn := 0
-	brokerArgs := BrokerArgs{p.ImageHeight, p.ImageWidth, p.Turns, world}
+	brokerArgs := BrokerArgs{p.ImageHeight, p.ImageWidth, p.Turns, world, listener.Addr().String()}
 	c.events <- StateChange{turn, Executing}
 
 	quitChan := make(chan bool)
@@ -158,24 +159,25 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 	case <-quitChan:
 		fmt.Println("QUIT CHAN")
 		var state WorldState
-		broker.Call("Broker.GetWorld", true, &state)
+		_ = broker.Call("Broker.GetWorld", true, &state)
 		finalWorld = copySliceWorld(state.World)
-
 		fmt.Println("Recieved World, size:", len(finalWorld), "x", len(finalWorld[0]))
+		fmt.Println("Turn", state.Turn, " | alive", len(calculateAliveCells(p, finalWorld)))
 		//done <- true
-		closeClient(p, c, state.Turn, done, ticker, listener, broker, client, finalWorld)
+		closeClient(p, c, state.Turn, done, ticker, listener, broker, stopConn, finalWorld)
 	case <-errChan:
 		fmt.Println("GOT RESULT")
 		fmt.Println("Recieved World, size:", len(finalWorld), "x", len(finalWorld[0]))
 		//done <- true
-		closeClient(p, c, p.Turns, done, ticker, listener, broker, client, finalWorld) //use p.turns as after it is done, the #turns completed = #turns given
+		closeClient(p, c, p.Turns, done, ticker, listener, broker, stopConn, finalWorld) //use p.turns as after it is done, the #turns completed = #turns given
 	}
 }
 
-func closeClient(p Params, c distributorChannels, turn int, tickerDone chan bool, ticker *time.Ticker, listener net.Listener, rpcClient *rpc.Client, clientStruct *Client, world [][]byte) {
+func closeClient(p Params, c distributorChannels, turn int, tickerDone chan bool, ticker *time.Ticker, listener net.Listener, rpcClient *rpc.Client, stopConn chan struct{}, world [][]byte) {
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 	//tickerDone <- struct{}{}
 	fmt.Println("CLOSING CLIENT")
+	fmt.Println("World has", len(calculateAliveCells(p, world)), "alive")
 	tickerDone <- true
 	ticker.Stop()
 
@@ -184,19 +186,19 @@ func closeClient(p Params, c distributorChannels, turn int, tickerDone chan bool
 		calculateAliveCells(p, world),
 	}
 
-	listener.Close()
-
-	var dummy bool
-	rpcClient.Call("Broker.DisconnectClient", true, &dummy)
-
 	//Output PGM image
 	outputPGMImage(p, c, turn, world)
+
+	listener.Close()
+	<-stopConn
+
+	var dummy bool
+	_ = rpcClient.Call("Broker.DisconnectClient", true, &dummy)
 
 	// Make sure that the Io has finished any output before exiting.
 	c.ioCommand <- ioCheckIdle
 	<-c.ioIdle
 
-	clientStruct.eventWG.Wait()
 	c.events <- StateChange{turn, Quitting}
 
 	// Close the channel to stop the SDL goroutine gracefully. Removing may cause deadlock.
@@ -224,12 +226,19 @@ func outputPGMImage(p Params, c distributorChannels, turn int, world [][]byte) {
 	}
 }
 
-func (client *Client) TurnComplete(args CellsFlipped, result *bool) error {
-	client.eventWG.Add(1)
-	defer client.eventWG.Done()
+func (client *Client) TurnComplete(args struct {
+	Turn               int
+	OldWorld, NewWorld [][]byte
+}, result *bool) error {
+	for y := 0; y < len(args.OldWorld); y++ {
+		for x := 0; x < len(args.OldWorld[0]); x++ {
+			if args.OldWorld[y][x] != args.NewWorld[y][x] {
+				client.c.events <- CellFlipped{Cell: util.Cell{x, y}, CompletedTurns: args.Turn}
+			}
+		}
+	}
 
-	client.c.events <- TurnComplete{CompletedTurns: args.CompletedTurns}
-	client.c.events <- CellsFlipped{args.CompletedTurns, args.Cells}
+	client.c.events <- TurnComplete{CompletedTurns: args.Turn}
 	*result = true
 	return nil
 }
