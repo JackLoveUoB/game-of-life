@@ -19,6 +19,7 @@ type Broker struct {
 	Ips        []string
 	Client     *rpc.Client
 	sendWg     sync.WaitGroup
+	stopChan   chan bool
 }
 
 type BrokerArgs struct {
@@ -75,10 +76,17 @@ func main() {
 	}
 	fmt.Println("Listening on port 1235...")
 
+	stopBroker := make(chan bool)
+
 	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			continue
+		conn, _ := listener.Accept()
+		
+		select {
+		case <-stopBroker:
+			fmt.Println("Returned")
+			return
+		default:
+
 		}
 		go func() {
 			// Create an RPC server instance just for THIS connection
@@ -86,6 +94,7 @@ func main() {
 
 			// Create a brand-new Broker for THIS connection
 			broker := new(Broker)
+			broker.stopChan = stopBroker
 			broker.sendWg.Add(1)
 			broker.KeyPresses = make(chan rune, 10)
 			broker.Listener = listener
@@ -132,7 +141,6 @@ func (broker *Broker) DisconnectClient(args bool, result *bool) error {
 }
 
 func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error {
-	defer fmt.Println("Returned!!")
 	if args.Turns == 0 {
 		fmt.Println("No turns, sending back initial world")
 		*result = copySliceWorld(args.World)
@@ -178,6 +186,7 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 				}
 				go func() {
 					time.Sleep(100 * time.Millisecond)
+					close(broker.stopChan)
 					broker.Listener.Close()
 				}() //allow time for the world to be sent back to the distributor
 				*result = world
