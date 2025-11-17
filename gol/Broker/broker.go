@@ -80,7 +80,7 @@ func main() {
 
 	for {
 		conn, _ := listener.Accept()
-		
+
 		select {
 		case <-stopBroker:
 			fmt.Println("Returned")
