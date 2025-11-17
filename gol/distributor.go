@@ -18,7 +18,7 @@ type distributorChannels struct {
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
-func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
+func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 
 	// TODO: Create a 2D slice to store the world.
 	//c.ioFilename <- "128x128"
@@ -57,6 +57,10 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 	allTurnsDone := make(chan bool)
 	//currentTurnDone := make(chan bool)
 
+	if p.Turns == 0 {
+		goto endSequence //skip all instantiation if p.Turns is 0
+	}
+
 	go func() {
 		for {
 			select {
@@ -74,21 +78,21 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 	}()
 
 	go func() {
-		for keys := range keyPress2 {
+		for key := range keyPresses {
 			mu.Lock()
-			if keys == 's' {
+			if key == 's' {
 				worldSave := copySliceWorld(world)
 				saveTurn := completedTurns
 				mu.Unlock()
 				outputPgm(p, c, worldSave, saveTurn)
 				continue
 			}
-			if keys == 'q' {
+			if key == 'q' {
 				quitFlag = true
 				mu.Unlock()
 				return
 			}
-			if keys == 'p' {
+			if key == 'p' {
 				//pauseChannel <- struct{}{}
 				pauseFlag = !pauseFlag
 				turn2 := completedTurns
@@ -122,26 +126,25 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 			break
 		}
 
-		if antiRacingPause {
+		if !antiRacingPause {
+			mu.Lock()
+			antiRacingTurn := completedTurns + 1
+			antiRacingWorld := world
+			mu.Unlock()
+
+			antiRaceNextWorld := executer(p, c, antiRacingTurn, &mu, antiRacingWorld)
+
+			mu.Lock()
+			world = antiRaceNextWorld
+			completedTurns = antiRacingTurn
+			finalAntiRacingTurn := completedTurns
+			mu.Unlock()
+			c.events <- TurnComplete{
+				finalAntiRacingTurn,
+			}
+		} else {
 			turn--
 			time.Sleep(1 * time.Millisecond)
-			continue
-		}
-
-		mu.Lock()
-		antiRacingTurn := completedTurns + 1
-		antiRacingWorld := world
-		mu.Unlock()
-
-		antiRaceNextWorld := executer(p, c, antiRacingTurn, &mu, antiRacingWorld)
-
-		mu.Lock()
-		world = antiRaceNextWorld
-		completedTurns = antiRacingTurn
-		finalAntiRacingTurn := completedTurns
-		mu.Unlock()
-		c.events <- TurnComplete{
-			finalAntiRacingTurn,
 		}
 	}
 
@@ -149,6 +152,7 @@ func distributor(p Params, c distributorChannels, keyPress2 <-chan rune) {
 	allTurnsDone <- true
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
+endSequence:
 
 	outputPgm(p, c, world, completedTurns)
 
@@ -214,17 +218,19 @@ func executer(p Params, c distributorChannels, completedTurns int, mu *sync.Mute
 	} else {
 		//Calculate chunks for the workers
 		chunkHeight := p.ImageHeight / p.Threads
+		chunkRemain := p.ImageHeight - (chunkHeight * p.Threads)
 		outyChannels := make([]chan [][]byte, p.Threads)
 		for i := 0; i < p.Threads; i++ {
 			outyChannels[i] = make(chan [][]byte)
 		}
+		startY := 0
 		for i := 0; i < p.Threads; i++ {
-			startY := i * chunkHeight // chunkHeight
-			endY := (i + 1) * chunkHeight
-			if i == p.Threads-1 {
-				endY = p.ImageHeight
+			workerChunkHeight := chunkHeight
+			if chunkRemain > 0 {
+				workerChunkHeight++
+				chunkRemain--
 			}
-
+			endY := startY + workerChunkHeight
 			go worker(
 				p,
 				c,
@@ -233,6 +239,7 @@ func executer(p Params, c distributorChannels, completedTurns int, mu *sync.Mute
 				endY,
 				completedTurns,
 				outyChannels[i])
+			startY = endY
 		}
 		for i := 0; i < p.Threads; i++ {
 			newWorld = append(newWorld, <-outyChannels[i]...)

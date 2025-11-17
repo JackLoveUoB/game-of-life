@@ -3,6 +3,17 @@ import matplotlib.pyplot as plt
 
 # Read whitespace-separated benchmark output:
 #   BenchmarkGol/512x512x1000-1-16   1   18924333933 ns/op
+
+plt.rcParams.update({
+    "font.size": 20,          # base font size
+    #"axes.titlesize": 22,     # title font size
+    "axes.labelsize": 20,     # x/y label size
+    "xtick.labelsize": 20,
+    "ytick.labelsize": 15,
+    "legend.fontsize": 25
+})
+
+
 benchmark_data = pd.read_csv(
     "results.csv",
     delim_whitespace=True,
@@ -37,7 +48,7 @@ benchmark_data = benchmark_data.sort_values("threads")
 print(benchmark_data)
 
 # ---- Line graph: threads vs time_sec ----
-plt.figure(figsize=(8, 5))
+plt.figure(figsize=(10, 10))
 plt.plot(
     benchmark_data["threads"],
     benchmark_data["time_sec"],
@@ -46,7 +57,7 @@ plt.plot(
 
 plt.xlabel("Worker threads used")
 plt.ylabel("Time per run (seconds per op)")
-plt.title("Game of Life 512x512x1000: time vs threads")
+plt.title("")
 plt.grid(True)
 plt.xticks(benchmark_data["threads"])  # discrete ticks at 1..16
 
