@@ -91,6 +91,7 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 	}
 
 	turn := 0
+	pauseFlag := false
 	brokerArgs := BrokerArgs{p.ImageHeight, p.ImageWidth, p.Turns, world, listener.Addr().String()}
 	c.events <- StateChange{turn, Executing}
 
@@ -123,6 +124,9 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 			case <-done:
 				return
 			case <-ticker.C:
+				if pauseFlag {
+					continue
+				}
 				var result AliveCellsCount
 				_ = broker.Call("Broker.GetAliveCells", brokerArgs, &result)
 				turn = result.CompletedTurns
@@ -133,7 +137,6 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 
 	//TODO: Handle keypresses
 	go func() {
-		pauseFlag := false
 		for key := range keyPress {
 			if key == 's' {
 				var state WorldState
@@ -145,10 +148,11 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 				quitChan <- true
 			} else if key == 'p' {
 				pauseFlag = !pauseFlag
+				currentTurn := turn
 				if pauseFlag {
-					c.events <- StateChange{turn, Paused}
+					c.events <- StateChange{currentTurn, Paused}
 				} else {
-					c.events <- StateChange{turn, Executing}
+					c.events <- StateChange{currentTurn, Executing}
 				}
 			}
 			var callback bool
