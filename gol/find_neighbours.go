@@ -1,6 +1,5 @@
 package gol
 
-//go:noinline
 func findNeighbours(p Params, rowIndex, columnIndex int, chunkedWorld [][]byte) int {
 	adjacentAlive := 0
 

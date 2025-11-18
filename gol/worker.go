@@ -1,33 +1,39 @@
 package gol
 
+import "sync"
+
 type workerTask struct {
 	world  [][]byte
+	next   [][]byte
 	startY int
 	endY   int
 	turn   int
-	out    chan<- [][]byte
+	wg     *sync.WaitGroup
 }
 
 func workerNoShutDown(p Params, c distributorChannels, tasks <-chan workerTask) {
 	for task := range tasks {
-		chunkHeight := task.endY - task.startY
+		//chunkHeight := task.endY - task.startY
+		//
+		//chunky := makeWorld(chunkHeight+2, p.ImageWidth)
+		//
+		//for y := 0; y < chunkHeight+2; y++ {
+		//	sauceY := task.startY + y - 1
+		//
+		//	if sauceY < 0 {
+		//		sauceY = sauceY + p.ImageHeight
+		//	} else if sauceY >= p.ImageHeight {
+		//		sauceY = sauceY - p.ImageHeight
+		//	}
+		//	copy(chunky[y], task.world[sauceY])
+		//}
+		//next := calculateNextState(c, p, p.Turns, task.turn, task.startY, chunky)
+		//trimItDown := next[1 : len(next)-1]
+		//
+		//task.out <- trimItDown
 
-		chunky := makeWorld(chunkHeight+2, p.ImageWidth)
-
-		for y := 0; y < chunkHeight+2; y++ {
-			sauceY := task.startY + y - 1
-
-			if sauceY < 0 {
-				sauceY = sauceY + p.ImageHeight
-			} else if sauceY >= p.ImageHeight {
-				sauceY = sauceY - p.ImageHeight
-			}
-			copy(chunky[y], task.world[sauceY])
-		}
-		next := calculateNextState(c, p, p.Turns, task.turn, task.startY, chunky)
-		trimItDown := next[1 : len(next)-1]
-
-		task.out <- trimItDown
+		calculateNextStateDirect(c, p, p.Turns, task.turn, task.startY, task.endY, task.world, task.next)
+		task.wg.Done()
 	}
 }
 

@@ -56,26 +56,34 @@ def parse_file(path: str):
 
 
 def main():
-    if len(sys.argv) < 4:
+    if len(sys.argv) < 6:
         print("Usage: python plot_compare_line.py file1 file2 file3 [label1 label2 label3]")
         sys.exit(1)
 
     file1 = sys.argv[1]
     file2 = sys.argv[2]
     file3 = sys.argv[3]
+    file4 = sys.argv[4]
+    file5 = sys.argv[5]
 
-    label1 = sys.argv[4] if len(sys.argv) > 4 else "Run 1"
-    label2 = sys.argv[5] if len(sys.argv) > 5 else "Run 2"
-    label3 = sys.argv[6] if len(sys.argv) > 6 else "Run 3"
+    label1 = sys.argv[6] if len(sys.argv) > 4 else "Run 1"
+    label2 = sys.argv[7] if len(sys.argv) > 5 else "Run 2"
+    label3 = sys.argv[8] if len(sys.argv) > 6 else "Run 3"
+    label4 = sys.argv[9] if len(sys.argv) > 7 else "Run 4"
+    label5 = sys.argv[10] if len(sys.argv) > 8 else "Run 5"
 
     threads1, times1 = parse_file(file1)
     threads2, times2 = parse_file(file2)
     threads3, times3 = parse_file(file3)
+    threads4, times4 = parse_file(file4)
+    threads5, times5 = parse_file(file5)
 
     plt.figure(figsize=(12, 10))
     plt.plot(threads1, times1, marker="o", label=label1)
     plt.plot(threads2, times2, marker="o", label=label2)
     plt.plot(threads3, times3, marker="o", label=label3)
+    plt.plot(threads4, times4, marker="o", label=label4)
+    plt.plot(threads5, times5, marker="o", label=label5)
 
     plt.xticks(range(1, 17, 1))
     plt.yticks(range(0, 12, 1))

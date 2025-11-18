@@ -195,7 +195,6 @@ endSequence:
 	close(c.events)
 }
 
-//go:noinline
 func adjustLeftRight(finalX, width int) int {
 	if finalX < 0 {
 		return width - 1
@@ -206,7 +205,6 @@ func adjustLeftRight(finalX, width int) int {
 	return finalX
 }
 
-//go:noinline
 func adjustUpDown(finalY, height int) int {
 	if finalY < 0 {
 		return height - 1
@@ -235,50 +233,56 @@ func makeWorld(height, width int) [][]byte {
 }
 
 func executer(p Params, c distributorChannels, completedTurns int, mu *sync.Mutex, world [][]byte, tasks chan<- workerTask) [][]byte {
-	var newWorld [][]byte
+	next := makeWorld(p.ImageHeight, p.ImageWidth)
 
 	if p.Threads == 1 {
-		newWorld = calculateNextState(c, p, p.Turns, completedTurns, 0, world)
-	} else {
-		////Calculate chunks for the workers
-		chunkHeight := p.ImageHeight / p.Threads
-		chunkRemain := p.ImageHeight - (chunkHeight * p.Threads)
-		outyChannels := make([]chan [][]byte, p.Threads)
-		for i := 0; i < p.Threads; i++ {
-			outyChannels[i] = make(chan [][]byte)
-		}
-		startY := 0
-		for i := 0; i < p.Threads; i++ {
-			workerChunkHeight := chunkHeight
-			if chunkRemain > 0 {
-				workerChunkHeight++
-				chunkRemain--
-			}
-			endY := startY + workerChunkHeight
-
-			tasks <- workerTask{
-				world:  world,
-				startY: startY,
-				endY:   endY,
-				turn:   completedTurns,
-				out:    outyChannels[i],
-			}
-
-			//	go worker(
-			//		p,
-			//		c,
-			//		world,
-			//		startY,
-			//		endY,
-			//		completedTurns,
-			//		outyChannels[i])
-
-			startY = endY
-		}
-		for i := 0; i < p.Threads; i++ {
-			newWorld = append(newWorld, <-outyChannels[i]...)
-		}
-
+		//next = calculateNextState(c, p, p.Turns, completedTurns, 0, world)
+		calculateNextStateDirect(c, p, p.Turns, completedTurns, 0, p.ImageHeight, world, next)
+		return next
 	}
-	return newWorld
+	////Calculate chunks for the workers
+	var wg sync.WaitGroup
+	chunkHeight := p.ImageHeight / p.Threads
+	chunkRemain := p.ImageHeight - (chunkHeight * p.Threads)
+	wg.Add(p.Threads)
+
+	//outyChannels := make([]chan [][]byte, p.Threads)
+	//for i := 0; i < p.Threads; i++ {
+	//	outyChannels[i] = make(chan [][]byte)
+	//}
+	startY := 0
+	for i := 0; i < p.Threads; i++ {
+		workerChunkHeight := chunkHeight
+		if chunkRemain > 0 {
+			workerChunkHeight++
+			chunkRemain--
+		}
+		endY := startY + workerChunkHeight
+
+		tasks <- workerTask{
+			world:  world,
+			next:   next,
+			startY: startY,
+			endY:   endY,
+			turn:   completedTurns,
+			wg:     &wg,
+		}
+
+		//	go worker(
+		//		p,
+		//		c,
+		//		world,
+		//		startY,
+		//		endY,
+		//		completedTurns,
+		//		outyChannels[i])
+
+		startY = endY
+	}
+	//for i := 0; i < p.Threads; i++ {
+	//	next = append(next, <-outyChannels[i]...)
+	//}
+
+	wg.Wait()
+	return next
 }

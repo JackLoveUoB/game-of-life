@@ -15,7 +15,7 @@ plt.rcParams.update({
 
 
 benchmark_data = pd.read_csv(
-    "results_nofair.csv",
+    "results.csv",
     delim_whitespace=True,
     header=None,
     names=["name", "iters", "time_ns", "unit"],
