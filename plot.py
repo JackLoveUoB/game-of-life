@@ -15,7 +15,7 @@ plt.rcParams.update({
 
 
 benchmark_data = pd.read_csv(
-    "results.csv",
+    "results_nofair.csv",
     delim_whitespace=True,
     header=None,
     names=["name", "iters", "time_ns", "unit"],
@@ -54,9 +54,12 @@ plt.plot(
     benchmark_data["time_sec"],
     marker="o",
 )
+plt.xticks(range(1, 17, 1))         # ticks every 1 on x-axis
+plt.yticks(range(0, 13, 1))         # ticks every 1 on y-axis (pick a sensible max)
+
 
 plt.xlabel("Worker threads used")
-plt.ylabel("Time per run (seconds per op)")
+plt.ylabel("Time per run (seconds)")
 plt.title("")
 plt.grid(True)
 plt.xticks(benchmark_data["threads"])  # discrete ticks at 1..16

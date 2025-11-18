@@ -49,13 +49,27 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 	pauseFlag := false
 	turn := 0
 	completedTurns := 0
-
+	var tasks chan workerTask
+	var workerWaiting sync.WaitGroup
 	c.events <- StateChange{completedTurns, Executing}
 
 	//Start the AliveCellCount Event
 	ticker := time.NewTicker(2 * time.Second)
 	allTurnsDone := make(chan bool)
 	//currentTurnDone := make(chan bool)
+
+	if p.Threads > 1 {
+		if p.Turns > 0 {
+			tasks = make(chan workerTask)
+			workerWaiting.Add(p.Threads)
+			for i := 0; i < p.Threads; i++ {
+				go func() {
+					defer workerWaiting.Done()
+					workerNoShutDown(p, c, tasks)
+				}()
+			}
+		}
+	}
 
 	if p.Turns == 0 {
 		goto endSequence //skip all instantiation if p.Turns is 0
@@ -68,6 +82,9 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 
 				return
 			case <-ticker.C:
+				//if pauseFlag {
+				//	continue
+				//}
 				mu.Lock()
 				turn2 := completedTurns
 				alive2 := len(calculateAliveCells(p, world))
@@ -132,7 +149,7 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 			antiRacingWorld := world
 			mu.Unlock()
 
-			antiRaceNextWorld := executer(p, c, antiRacingTurn, &mu, antiRacingWorld)
+			antiRaceNextWorld := executer(p, c, antiRacingTurn, &mu, antiRacingWorld, tasks)
 
 			mu.Lock()
 			world = antiRaceNextWorld
@@ -150,6 +167,13 @@ func distributor(p Params, c distributorChannels, keyPresses <-chan rune) {
 
 	//stops the alive cells ticker
 	allTurnsDone <- true
+
+	if p.Threads > 1 {
+		if p.Turns > 0 {
+			close(tasks)
+			workerWaiting.Wait()
+		}
+	}
 
 	// TODO: Report the final state using FinalTurnCompleteEvent.
 endSequence:
@@ -210,13 +234,13 @@ func makeWorld(height, width int) [][]byte {
 	return world
 }
 
-func executer(p Params, c distributorChannels, completedTurns int, mu *sync.Mutex, world [][]byte) [][]byte {
+func executer(p Params, c distributorChannels, completedTurns int, mu *sync.Mutex, world [][]byte, tasks chan<- workerTask) [][]byte {
 	var newWorld [][]byte
 
 	if p.Threads == 1 {
 		newWorld = calculateNextState(c, p, p.Turns, completedTurns, 0, world)
 	} else {
-		//Calculate chunks for the workers
+		////Calculate chunks for the workers
 		chunkHeight := p.ImageHeight / p.Threads
 		chunkRemain := p.ImageHeight - (chunkHeight * p.Threads)
 		outyChannels := make([]chan [][]byte, p.Threads)
@@ -231,14 +255,24 @@ func executer(p Params, c distributorChannels, completedTurns int, mu *sync.Mute
 				chunkRemain--
 			}
 			endY := startY + workerChunkHeight
-			go worker(
-				p,
-				c,
-				world,
-				startY,
-				endY,
-				completedTurns,
-				outyChannels[i])
+
+			tasks <- workerTask{
+				world:  world,
+				startY: startY,
+				endY:   endY,
+				turn:   completedTurns,
+				out:    outyChannels[i],
+			}
+
+			//	go worker(
+			//		p,
+			//		c,
+			//		world,
+			//		startY,
+			//		endY,
+			//		completedTurns,
+			//		outyChannels[i])
+
 			startY = endY
 		}
 		for i := 0; i < p.Threads; i++ {

@@ -45,19 +45,21 @@ func calculateNextState(c distributorChannels, p Params, turns, turn, startY int
 			if alive == true {
 				if adjacentAlive < 2 || adjacentAlive > 3 {
 					copyWorld[i][j] = 0
+					listOfFlippedInner = append(listOfFlippedInner, util.Cell{j, globalY})
 					//listOfFlippedInner = append(listOfFlippedInner, newCell(j, globalY))
 				} else {
 					copyWorld[i][j] = 255
 				}
 			} else {
 				if adjacentAlive == 3 {
+					listOfFlippedInner = append(listOfFlippedInner, util.Cell{j, globalY})
 					copyWorld[i][j] = 255
 					//listOfFlippedInner = append(listOfFlippedInner, newCell(j, globalY))
 				}
 			}
 			if copyWorld[i][j] != chunkedWorld[i][j] {
 				//fmt.Println(j, i+startY)
-				listOfFlippedInner = append(listOfFlippedInner, util.Cell{j, globalY})
+				//listOfFlippedInner = append(listOfFlippedInner, util.Cell{j, globalY})
 			}
 
 		}
