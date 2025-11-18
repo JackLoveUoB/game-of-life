@@ -246,14 +246,19 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 
 				world = copySliceWorld(writeWorld)
 
+				broker.mu.Lock()
+				broker.turn = t + 1
+				broker.world = world
+				broker.mu.Unlock()
+
 			} else {
 				t--
 			}
 			//Update struct data
-			broker.mu.Lock()
-			broker.turn = t + 1
-			broker.world = world
-			broker.mu.Unlock()
+			//broker.mu.Lock()
+			//broker.turn = t + 1
+			//broker.world = world
+			//broker.mu.Unlock()
 		}
 	}
 	fmt.Println("Done! Sending world with size", len(world), "x", len(world[0]))

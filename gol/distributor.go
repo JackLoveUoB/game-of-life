@@ -148,7 +148,9 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 				quitChan <- true
 			} else if key == 'p' {
 				pauseFlag = !pauseFlag
-				currentTurn := turn
+				var state WorldState
+				_ = broker.Call("Broker.GetWorld", true, &state)
+				currentTurn := state.Turn
 				if pauseFlag {
 					c.events <- StateChange{currentTurn, Paused}
 				} else {
