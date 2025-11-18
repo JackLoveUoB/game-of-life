@@ -7,6 +7,7 @@ import (
 	"net/rpc"
 	"sync"
 	"time"
+
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -203,19 +204,20 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 				chunks := chunkWorld(numNodes, world)
 				calculatedChunks := make([][][]byte, numNodes)
 				trimmedChunks := make([][][]byte, numNodes)
-				var resultChunk [][]byte
+				//var resultChunk [][]byte // <<- COMMENT THIS RIGHT HERE/
 
 				wg := sync.WaitGroup{}
 				wg.Add(numNodes)
 				for i, node := range nodes {
 					chunk := chunks[i]
 					nodeArgs := NodeArgs{
-						len(chunks[i]),
-						len(chunks[i][0]),
+						len(chunk),
+						len(chunk[0]),
 						args.Turns,
 						copySliceWorld(chunk)}
 					go func(currentNode *rpc.Client, args NodeArgs, n int) {
 						defer wg.Done()
+						var resultChunk [][]byte // <- THIS RIGHT HERE
 						_ = currentNode.Call("Node.CalculateNextState2", args, &resultChunk)
 						//need to trim result
 						calculatedChunks[n] = resultChunk
