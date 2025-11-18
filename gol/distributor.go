@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/rpc"
 	"time"
+
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
@@ -167,6 +168,11 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 		closeClient(p, c, state.Turn, done, ticker, listener, broker, stopConn, finalWorld)
 	case <-errChan:
 		fmt.Println("GOT RESULT")
+		if err != nil {
+			fmt.Println("Error:", err)
+			closeClient(p, c, turn, done, ticker, listener, broker, stopConn, world)
+			return
+		}
 		fmt.Println("Recieved World, size:", len(finalWorld), "x", len(finalWorld[0]))
 		//done <- true
 		closeClient(p, c, p.Turns, done, ticker, listener, broker, stopConn, finalWorld) //use p.turns as after it is done, the #turns completed = #turns given

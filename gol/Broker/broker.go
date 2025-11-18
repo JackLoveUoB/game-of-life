@@ -148,6 +148,12 @@ func (broker *Broker) CalculateNStates(args BrokerArgs, result *[][]byte) error 
 		return nil
 	}
 	numNodes := len(broker.Ips)
+	if numNodes > args.ImageHeight {
+		numNodes = args.ImageHeight
+	}
+	if numNodes == 0 {
+		return fmt.Errorf("no nodes lil bro")
+	}
 	nodes := make([]*rpc.Client, numNodes)
 	//Establish connection with node
 	fmt.Println("nodes:", numNodes)
@@ -315,28 +321,64 @@ func calculateNumAliveCells(imageHeight, imageWidth int, world [][]byte) int {
 func chunkWorld(numNodes int, world [][]byte) [][][]byte {
 	result := make([][][]byte, numNodes)
 	imageHeight := len(world)
+	imageWidth := len(world[0])
+
+	if imageHeight < numNodes {
+		panic(fmt.Sprintf("Image height %d is less than number of nodes %d", imageHeight, numNodes))
+	}
+
 	chunkHeight := imageHeight / numNodes
+	chunkRemain := imageHeight - (chunkHeight * numNodes)
 
+	startY := 0
 	for i := 0; i < numNodes; i++ {
-		start := (i * chunkHeight) - 1
-		if start < 0 {
-			start = 0
+		nodeChunkHeight := chunkHeight
+		if chunkRemain > 0 {
+			nodeChunkHeight++
+			chunkRemain--
 		}
-		end := ((i + 1) * chunkHeight) + 1
-		if i == numNodes-1 {
-			end = imageHeight
+		endY := startY + nodeChunkHeight
+		nodeChunkHeightButCool := nodeChunkHeight + 2
+		chunky := make([][]byte, nodeChunkHeightButCool)
+		for row := 0; row < nodeChunkHeightButCool; row++ {
+			chunky[row] = make([]byte, imageWidth)
 		}
-		chunk := copySliceWorld(world[start:end])
 
-		if i == 0 {
-			chunk = append([][]byte{world[len(world)-1]}, chunk...)
+		for y := 0; y < nodeChunkHeightButCool; y++ {
+			sauceY := startY + y - 1
+
+			if sauceY < 0 {
+				sauceY = sauceY + imageHeight
+			} else if sauceY >= imageHeight {
+				sauceY = sauceY - imageHeight
+			}
+			copy(chunky[y], world[sauceY])
 		}
-		if i == numNodes-1 {
-			chunk = append(chunk, world[0])
-		}
-		result[i] = chunk
+		result[i] = chunky
+		startY = endY
 	}
 	return result
+
+	//for i := 0; i < numNodes; i++ {
+	//	start := (i * chunkHeight) - 1
+	//	if start < 0 {
+	//		start = 0
+	//	}
+	//	end := ((i + 1) * chunkHeight) + 1
+	//	if i == numNodes-1 {
+	//		end = imageHeight
+	//	}
+	//	chunk := copySliceWorld(world[start:end])
+	//
+	//	if i == 0 {
+	//		chunk = append([][]byte{world[len(world)-1]}, chunk...)
+	//	}
+	//	if i == numNodes-1 {
+	//		chunk = append(chunk, world[0])
+	//	}
+	//	result[i] = chunk
+	//}
+	//return result
 }
 
 func copySliceWorld(world [][]byte) [][]byte {
