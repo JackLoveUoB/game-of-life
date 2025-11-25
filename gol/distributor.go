@@ -124,9 +124,9 @@ func distributor(p Params, c distributorChannels, keyPress <-chan rune) {
 			case <-done:
 				return
 			case <-ticker.C:
-				if pauseFlag {
-					continue
-				}
+				//if pauseFlag {
+				//	continue
+				//}
 				var result AliveCellsCount
 				_ = broker.Call("Broker.GetAliveCells", brokerArgs, &result)
 				turn = result.CompletedTurns
